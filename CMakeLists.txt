@@ -10,6 +10,10 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 add_executable(sng2kss src/sng2kss.c src/sng2kss_converter.c)
 target_include_directories(sng2kss PRIVATE src)
 
+add_executable(pro2kss src/pro2kss.c src/pro_tracker_converter.c)
+target_include_directories(pro2kss PRIVATE src)
+
 if(UNIX)
   target_link_libraries(sng2kss PRIVATE m)
+  target_link_libraries(pro2kss PRIVATE m)
 endif()
