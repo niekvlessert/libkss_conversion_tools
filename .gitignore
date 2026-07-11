@@ -1,2 +1,7 @@
 build/
 *.kss
+pro/*
+pro_tracker/
+old/
+sng/*
+*.zip

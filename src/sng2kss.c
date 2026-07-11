@@ -7,7 +7,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-#include "kss/kss.h"
+#include "sng2kss_converter.h"
 
 typedef struct {
   uint8_t *data;
@@ -240,14 +240,14 @@ static void free_inputs(InputFile *inputs, uint32_t count) {
   free(inputs);
 }
 
-static KSS *convert_range(InputFile *inputs, uint32_t start, uint32_t count) {
-  uint8_t **data;
+static SNG_KSS *convert_range(InputFile *inputs, uint32_t start, uint32_t count) {
+  const uint8_t **data;
   uint32_t *sizes;
   const char **titles;
   uint32_t i;
-  KSS *kss;
+  SNG_KSS *kss;
 
-  data = (uint8_t **)calloc(count, sizeof(uint8_t *));
+  data = calloc(count, sizeof(*data));
   sizes = (uint32_t *)calloc(count, sizeof(uint32_t));
   titles = (const char **)calloc(count, sizeof(char *));
   if (!data || !sizes || !titles) {
@@ -263,7 +263,7 @@ static KSS *convert_range(InputFile *inputs, uint32_t start, uint32_t count) {
     titles[i] = inputs[start + i].title;
   }
 
-  kss = KSS_sngs2kss(data, sizes, titles, count);
+  kss = sngs_to_kss(data, sizes, titles, count);
   free(data);
   free(sizes);
   free(titles);
@@ -271,17 +271,17 @@ static KSS *convert_range(InputFile *inputs, uint32_t start, uint32_t count) {
 }
 
 static int write_range(InputFile *inputs, uint32_t start, uint32_t count, const char *output) {
-  KSS *kss = convert_range(inputs, start, count);
+  SNG_KSS *kss = convert_range(inputs, start, count);
   if (!kss)
     return 1;
 
   if (write_file(output, kss->data, kss->size)) {
-    KSS_delete(kss);
+    sng_kss_delete(kss);
     return 1;
   }
 
   printf("wrote %s (%u track%s)\n", output, count, count == 1 ? "" : "s");
-  KSS_delete(kss);
+  sng_kss_delete(kss);
   return 0;
 }
 
@@ -297,10 +297,10 @@ static int write_split_outputs(InputFile *inputs, uint32_t count, const char *ou
 
     while (lo <= hi) {
       uint32_t mid = lo + (hi - lo) / 2;
-      KSS *probe = convert_range(inputs, start, mid - start);
+      SNG_KSS *probe = convert_range(inputs, start, mid - start);
       if (probe) {
         best = mid;
-        KSS_delete(probe);
+        sng_kss_delete(probe);
         lo = mid + 1;
       } else {
         hi = mid - 1;
@@ -335,7 +335,7 @@ int main(int argc, char **argv) {
   uint32_t input_count, valid_count = 0, i;
   PathList paths = {0};
   InputFile *inputs = NULL;
-  KSS *kss;
+  SNG_KSS *kss;
   char *default_output = NULL;
   int result = 1;
 
@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
     if (read_file(path, &file_data, &file_size))
       goto cleanup;
 
-    if (!KSS_isSNGdata(file_data, file_size)) {
+    if (!sng_is_valid(file_data, file_size)) {
       fprintf(stderr, "%s: not recognized as Musixx SNG, skipping\n", path);
       free(file_data);
       continue;
@@ -429,7 +429,7 @@ int main(int argc, char **argv) {
     printf("wrote %s (%u track%s)\n", output, valid_count, valid_count == 1 ? "" : "s");
     result = 0;
   }
-  KSS_delete(kss);
+  sng_kss_delete(kss);
 
 cleanup:
   free(default_output);
