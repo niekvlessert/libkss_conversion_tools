@@ -4,9 +4,9 @@
  * The original files are already complete KSS machine images.  This tool
  * keeps their engines and banked data intact, but loads each initial image
  * through a shared ZX0 decoder selected by a small dispatcher.  The two
- * source files using the 8K mapper are normalized to the common 16K mapper;
- * the other source engines keep their original mapper instructions, with
- * their bank numbers redirected to the merged bank area.
+ * source engines can be emitted into either a common 16K or common 8K bank
+ * map; the other source engines keep their original mapper instructions,
+ * with their bank numbers redirected to the merged bank area.
  */
 
 #include <dirent.h>
@@ -24,15 +24,18 @@
 #define KSS_HEADER_SIZE 0x20
 #define KSS_TITLE_MAX 256
 #define KSS_MAX_LOAD_SIZE 0xFE00
-#define KSS_BANK_SIZE 0x4000
+#define KSS_BANK_SIZE_8K 0x2000
+#define KSS_BANK_SIZE_16K 0x4000
 #define KSS_BANK_OFFSET 6
 #define KSS_MAX_BANKS 127
 #define KSS_MAX_TRACKS 256
 #define INITIAL_CHUNK_SIZE 0x2000
+#define CHUNK_RAW_OFFSET 0xFFFE
 
 #define MERGED_LOAD_ADDRESS 0x0200
 #define MERGED_INIT_ADDRESS 0xF000
 #define MERGED_DECODER_ADDRESS 0xF200
+#define MERGED_BANK_LOADER_ADDRESS 0xE600
 #define MERGED_STUB_ADDRESS 0xE400
 #define MERGED_VARIABLE_ADDRESS 0xF5C0
 #define MERGED_GAME_DESCRIPTOR_ADDRESS 0xF600
@@ -51,9 +54,22 @@
 #define CURRENT_MAIN_BANK_ADDRESS (MERGED_VARIABLE_ADDRESS + 16)
 #define CURRENT_8K_PAGE4_ADDRESS (MERGED_VARIABLE_ADDRESS + 18)
 #define CURRENT_8K_PAGE5_ADDRESS (MERGED_VARIABLE_ADDRESS + 19)
+#define CURRENT_COMP_BANK_ADDRESS (MERGED_VARIABLE_ADDRESS + 20)
+#define CURRENT_SOURCE_PTR_ADDRESS (MERGED_VARIABLE_ADDRESS + 21)
+#define CURRENT_BIT_BUFFER_ADDRESS (MERGED_VARIABLE_ADDRESS + 23)
+#define CURRENT_BIT_MASK_ADDRESS (MERGED_VARIABLE_ADDRESS + 24)
+#define CURRENT_LAST_OFFSET_ADDRESS (MERGED_VARIABLE_ADDRESS + 25)
+#define CURRENT_COMP_BYTE_ADDRESS (MERGED_VARIABLE_ADDRESS + 27)
+#define CURRENT_REQUEST_BANK_ADDRESS (MERGED_VARIABLE_ADDRESS + 28)
+#define CURRENT_LOADED_BANK_ADDRESS (MERGED_VARIABLE_ADDRESS + 29)
+#define CURRENT_SAVED_SP_ADDRESS (MERGED_VARIABLE_ADDRESS + 32)
+#define CURRENT_BUFFER_PTR_ADDRESS (MERGED_VARIABLE_ADDRESS + 34)
+#define CURRENT_BUFFER_COUNT_ADDRESS (MERGED_VARIABLE_ADDRESS + 36)
+#define COMPRESSED_BUFFER_ADDRESS 0xF480
 
-#define GAME_DESCRIPTOR_SIZE 8
+#define GAME_DESCRIPTOR_SIZE 12
 #define CHUNK_DESCRIPTOR_SIZE 9
+#define BANK_DESCRIPTOR_SIZE 3
 #define MAX_GAME_NAME 64
 #define MAX_METADATA 512
 #define MAX_TRACK_TITLE 256
@@ -88,6 +104,11 @@ typedef struct {
 } CHUNK_REFERENCE;
 
 typedef struct {
+  uint8_t bank;
+  uint16_t source;
+} BANK_REFERENCE;
+
+typedef struct {
   uint32_t image_offset;
   uint32_t branch_offset;
   uint8_t next[3];
@@ -112,9 +133,14 @@ typedef struct {
   uint32_t initial_size;
   uint32_t global_bank_base;
   uint8_t main_bank;
+  uint8_t main_window_compressed;
+  BANK_REFERENCE main_window_stream;
   uint8_t combo_options;
   uint32_t chunk_count;
   CHUNK_REFERENCE *chunks;
+  uint32_t compressed_bank_count;
+  BANK_REFERENCE *compressed_banks;
+  uint16_t bank_descriptor_address;
   BANK_PATCH *patches;
   uint32_t patch_count;
   uint16_t descriptor_address;
@@ -136,6 +162,9 @@ typedef struct {
   uint32_t count;
   uint32_t raw_count;
   uint32_t stream_offset;
+  uint32_t bank_size;
+  uint8_t bank_mode;
+  uint8_t compression_enabled;
 } BANK_PACK;
 
 typedef struct {
@@ -176,6 +205,34 @@ static void patch_word(uint8_t *image, uint32_t address, uint16_t value) {
 static void patch_relative(uint8_t *image, uint32_t address, uint32_t target) {
   int32_t delta = (int32_t)target - (int32_t)(address + 2);
   image[address - MERGED_LOAD_ADDRESS + 1] = (uint8_t)delta;
+}
+
+static void emit_select_current_main_bank(uint8_t *image, uint32_t *pc,
+                                          uint8_t bank_mode) {
+  emit_byte(image, pc, 0x3A); /* A = current main bank selector */
+  emit_word(image, pc, CURRENT_MAIN_BANK_ADDRESS);
+  if (bank_mode == 8) {
+    emit_byte(image, pc, 0x32); /* page 4: 8000H-9FFFH */
+    emit_word(image, pc, 0x9000);
+    emit_byte(image, pc, 0x3C);
+    emit_byte(image, pc, 0x32); /* page 5: A000H-BFFFH */
+    emit_word(image, pc, 0xB000);
+  } else {
+    emit_byte(image, pc, 0xD3);
+    emit_byte(image, pc, 0xFE);
+  }
+}
+
+static void emit_select_compressed_bank(uint8_t *image, uint32_t *pc,
+                                        uint8_t bank_mode) {
+  if (bank_mode == 8) {
+    /* Compressed streams are always addressed from the lower 8K page. */
+    emit_byte(image, pc, 0x32);
+    emit_word(image, pc, 0x9000);
+  } else {
+    emit_byte(image, pc, 0xD3);
+    emit_byte(image, pc, 0xFE);
+  }
 }
 
 static char *trim(char *value) {
@@ -429,12 +486,12 @@ static int bank_pack_reserve(BANK_PACK *pack, uint32_t count) {
   uint8_t *new_data;
   if (count > KSS_MAX_BANKS)
     return 1;
-  new_data = (uint8_t *)realloc(pack->data, count * KSS_BANK_SIZE);
+  new_data = (uint8_t *)realloc(pack->data, count * pack->bank_size);
   if (!new_data)
     return 1;
   pack->data = new_data;
-  memset(pack->data + pack->count * KSS_BANK_SIZE, 0xC9,
-         (count - pack->count) * KSS_BANK_SIZE);
+  memset(pack->data + pack->count * pack->bank_size, 0xC9,
+         (count - pack->count) * pack->bank_size);
   pack->count = count;
   return 0;
 }
@@ -444,7 +501,7 @@ static uint32_t bank_pack_add_raw(BANK_PACK *pack, const uint8_t *data) {
   if (pack->stream_offset != 0 || bank_pack_reserve(pack, pack->count + 1))
     return 0;
   bank = KSS_BANK_OFFSET + pack->count - 1;
-  memcpy(pack->data + (pack->count - 1) * KSS_BANK_SIZE, data, KSS_BANK_SIZE);
+  memcpy(pack->data + (pack->count - 1) * pack->bank_size, data, pack->bank_size);
   pack->raw_count = pack->count;
   return bank;
 }
@@ -454,32 +511,50 @@ static uint32_t bank_pack_add_stream(BANK_PACK *pack, const uint8_t *data,
   uint32_t bank;
   uint32_t offset;
 
-  if (!data || size == 0 || size > KSS_BANK_SIZE)
+  if (!data || size == 0 || size > pack->bank_size)
     return 0;
-  if (pack->count == pack->raw_count || pack->stream_offset + size > KSS_BANK_SIZE) {
+  if (pack->count == pack->raw_count || pack->stream_offset + size > pack->bank_size) {
     if (bank_pack_reserve(pack, pack->count + 1))
       return 0;
     pack->stream_offset = 0;
   }
   bank = KSS_BANK_OFFSET + pack->count - 1;
   offset = pack->stream_offset;
-  memcpy(pack->data + (pack->count - 1) * KSS_BANK_SIZE + offset, data, size);
+  memcpy(pack->data + (pack->count - 1) * pack->bank_size + offset, data, size);
   pack->stream_offset += size;
   *source = (uint16_t)(0x8000 + offset);
   return bank;
 }
 
-static int prepare_source_banks(GAME *game, BANK_PACK *pack) {
+static int prepare_source_banks(GAME *game, BANK_PACK *pack,
+                                int compress_data) {
   uint32_t i;
 
   game->global_bank_base = 0;
   if (game->bank_count != 0) {
     game->global_bank_base = pack->count + KSS_BANK_OFFSET;
   }
-  if (game->bank_count != 0 && game->bank_mode == 16) {
+  if (game->bank_count != 0 && game->bank_mode == 16 &&
+      pack->bank_mode == 8) {
     uint32_t bank_data_offset = 0x10 + game->load_size;
     for (i = 0; i < game->bank_count; i++) {
-      if (!bank_pack_add_raw(pack, game->file_data + bank_data_offset + i * 0x4000))
+      uint8_t *bank = game->file_data + bank_data_offset + i * 0x4000;
+      if (!bank_pack_add_raw(pack, bank) ||
+          !bank_pack_add_raw(pack, bank + KSS_BANK_SIZE_8K))
+        return 1;
+    }
+  } else if (game->bank_count != 0 && game->bank_mode == 16 &&
+             pack->bank_mode == 16 && !compress_data) {
+    uint32_t bank_data_offset = 0x10 + game->load_size;
+    for (i = 0; i < game->bank_count; i++) {
+      if (!bank_pack_add_raw(pack, game->file_data + bank_data_offset +
+                                      i * KSS_BANK_SIZE_16K))
+        return 1;
+    }
+  } else if (game->bank_count != 0 && game->bank_mode == 8 && pack->bank_mode == 8) {
+    uint32_t bank_data_offset = 0x10 + game->load_size;
+    for (i = 0; i < game->bank_count; i++) {
+      if (!bank_pack_add_raw(pack, game->file_data + bank_data_offset + i * KSS_BANK_SIZE_8K))
         return 1;
     }
   }
@@ -492,7 +567,7 @@ static void make_main_window(const GAME *game, uint8_t *window) {
   uint32_t copy_begin;
   uint32_t copy_end;
 
-  memset(window, 0, KSS_BANK_SIZE);
+  memset(window, 0, KSS_BANK_SIZE_16K);
   copy_begin = begin > 0x8000 ? begin : 0x8000;
   copy_end = end < 0xC000 ? end : 0xC000;
   if (copy_begin < copy_end)
@@ -501,15 +576,20 @@ static void make_main_window(const GAME *game, uint8_t *window) {
 }
 
 static int add_main_window_bank(GAME *game, BANK_PACK *pack) {
-  uint8_t window[KSS_BANK_SIZE];
+  uint8_t window[KSS_BANK_SIZE_16K];
 
   make_main_window(game, window);
   game->main_bank = (uint8_t)bank_pack_add_raw(pack, window);
+  if (pack->bank_mode == 8) {
+    uint32_t upper_bank = bank_pack_add_raw(pack, window + KSS_BANK_SIZE_8K);
+    if (!upper_bank || upper_bank != game->main_bank + 1)
+      return 1;
+  }
   return game->main_bank ? 0 : 1;
 }
 
 static int add_8k_combo_banks(GAME *game, BANK_PACK *pack) {
-  uint8_t main_window[KSS_BANK_SIZE];
+  uint8_t main_window[KSS_BANK_SIZE_16K];
   uint32_t bank_data_offset = 0x10 + game->load_size;
   uint32_t options = game->bank_count + 2; /* source banks, main, dummy */
   uint32_t page4;
@@ -522,7 +602,7 @@ static int add_8k_combo_banks(GAME *game, BANK_PACK *pack) {
   game->combo_options = (uint8_t)options;
   for (page4 = 0; page4 < options; page4++) {
     for (page5 = 0; page5 < options; page5++) {
-      uint8_t combo[KSS_BANK_SIZE];
+      uint8_t combo[KSS_BANK_SIZE_16K];
       memset(combo, 0, sizeof(combo)); /* invalid selectors read as zero */
       if (page4 < game->bank_count)
         memcpy(combo, game->file_data + bank_data_offset + page4 * 0x2000, 0x2000);
@@ -706,10 +786,11 @@ static int collect_16k_bank_patches(GAME *game) {
   return 0;
 }
 
-static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack) {
+static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack,
+                           int compress_data) {
   uint32_t i;
   for (i = 0; i < game_count; i++) {
-    if (prepare_source_banks(&games[i], pack))
+    if (prepare_source_banks(&games[i], pack, compress_data))
       return 1;
     if (games[i].bank_mode == 8) {
       if (collect_8k_mapper_patches(&games[i]))
@@ -717,15 +798,106 @@ static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack) {
     } else if (collect_16k_bank_patches(&games[i])) {
       return 1;
     }
-    if (add_main_window_bank(&games[i], pack))
+    if (compress_data && pack->bank_mode == 16 &&
+        games[i].bank_mode == 16) {
+      /* The compressed main-window stream is added after the source banks are
+       * laid out.  FF is the runtime marker for a writable RAM window. */
+      games[i].main_bank = 0xFF;
+    } else if (add_main_window_bank(&games[i], pack)) {
       return 1;
-    if (games[i].bank_mode == 8 && add_8k_combo_banks(&games[i], pack))
+    }
+    if (games[i].bank_mode == 8 && pack->bank_mode == 16 &&
+        add_8k_combo_banks(&games[i], pack))
       return 1;
   }
   return 0;
 }
 
-static int build_common_code(uint8_t *image, uint16_t *play_address) {
+/* Keep the 8K archive unchanged.  A real 16K source bank can be compressed
+ * as one ZX0 stream and decoded into the writable 16K main-RAM window when
+ * its mapper selector is used.  Streams may share output banks, so the
+ * descriptor records both the KSS bank selector and the stream address. */
+static int compress_source_banks(GAME *games, uint32_t game_count,
+                                 BANK_PACK *pack, int compress_data) {
+  uint32_t i;
+
+  if (pack->bank_mode != 16 || !compress_data)
+    return 0;
+  for (i = 0; i < game_count; i++) {
+    uint32_t j;
+    uint32_t bank_data_offset;
+
+    if (games[i].bank_mode == 16) {
+      uint8_t main_window[KSS_BANK_SIZE_16K];
+      uint8_t *compressed = NULL;
+      uint32_t compressed_size = 0;
+      uint32_t delta = 0;
+      uint16_t source;
+      uint32_t bank;
+
+      make_main_window(&games[i], main_window);
+      if (!zx0_compress_data(main_window, KSS_BANK_SIZE_16K, &compressed,
+                             &compressed_size, &delta)) {
+        fprintf(stderr, "%s: ZX0 failed for initial main window\n",
+                games[i].name);
+        free(compressed);
+        return 1;
+      }
+      bank = bank_pack_add_stream(pack, compressed, compressed_size, &source);
+      free(compressed);
+      if (!bank) {
+        fprintf(stderr, "%s: compressed initial main window is too large\n",
+                games[i].name);
+        return 1;
+      }
+      games[i].main_window_compressed = 1;
+      games[i].main_window_stream.bank = (uint8_t)bank;
+      games[i].main_window_stream.source = source;
+      fprintf(stderr, "%s: compressed initial 8000H-BFFFH main window\n",
+              games[i].name);
+    }
+
+    if (games[i].bank_mode != 16 || games[i].bank_count == 0)
+      continue;
+    games[i].compressed_banks = (BANK_REFERENCE *)calloc(
+        games[i].bank_count, sizeof(*games[i].compressed_banks));
+    if (!games[i].compressed_banks)
+      return 1;
+    games[i].compressed_bank_count = games[i].bank_count;
+    bank_data_offset = 0x10 + games[i].load_size;
+    for (j = 0; j < games[i].bank_count; j++) {
+      uint8_t *compressed = NULL;
+      uint32_t compressed_size = 0;
+      uint32_t delta = 0;
+      uint32_t bank;
+      uint16_t source;
+
+      if (!zx0_compress_data(games[i].file_data + bank_data_offset + j * 0x4000,
+                             KSS_BANK_SIZE_16K, &compressed, &compressed_size,
+                             &delta)) {
+        fprintf(stderr, "%s: ZX0 failed for source bank %u\n", games[i].name,
+                (unsigned)j);
+        free(compressed);
+        return 1;
+      }
+      bank = bank_pack_add_stream(pack, compressed, compressed_size, &source);
+      free(compressed);
+      if (!bank) {
+        fprintf(stderr, "%s: source bank %u compressed stream is too large\n",
+                games[i].name, (unsigned)j);
+        return 1;
+      }
+      games[i].compressed_banks[j].bank = (uint8_t)bank;
+      games[i].compressed_banks[j].source = source;
+    }
+    fprintf(stderr, "%s: compressed %u 16K source banks\n", games[i].name,
+            (unsigned)games[i].compressed_bank_count);
+  }
+  return 0;
+}
+
+static int build_common_code(uint8_t *image, uint16_t *play_address,
+                             uint8_t bank_mode) {
   uint32_t pc = MERGED_INIT_ADDRESS;
   uint32_t done_jump;
   uint32_t skip_jump;
@@ -733,9 +905,17 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   uint32_t direct_jump;
   uint32_t decrement_address;
   uint32_t direct_decode;
+  uint32_t raw_check_low_jump;
+  uint32_t raw_check_high_jump;
+  uint32_t raw_chunk_jump;
+  uint32_t raw_chunk_address;
+  uint32_t raw_copy_jump;
   uint32_t loop_address;
   uint32_t stack_return_patch;
   uint32_t post_init_return;
+  uint32_t clear_ram_jump;
+  uint32_t compressed_main_jump;
+  uint32_t main_window_selected_jump;
   uint32_t play;
 
   /* Track table entry: [game index, original song number, game descriptor]. */
@@ -783,16 +963,52 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   for (int i = 0; i < 7; i++)
     emit_byte(image, &pc, 0x23);
   emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0xFE); /* FF means the main window is compressed */
+  emit_byte(image, &pc, 0xFF);
+  compressed_main_jump = pc;
+  emit_byte(image, &pc, 0x28); /* JR Z, compressed_main */
+  emit_byte(image, &pc, 0);
   emit_byte(image, &pc, 0x32);
   emit_word(image, &pc, CURRENT_MAIN_BANK_ADDRESS);
-  emit_byte(image, &pc, 0xD3);
-  emit_byte(image, &pc, 0xFE);
+  emit_select_current_main_bank(image, &pc, bank_mode);
+  main_window_selected_jump = pc;
+  emit_byte(image, &pc, 0x18); /* JR main_window_selected */
+  emit_byte(image, &pc, 0);
+
+  patch_relative(image, compressed_main_jump, pc);
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_MAIN_BANK_ADDRESS);
+  emit_select_current_main_bank(image, &pc, bank_mode);
+  emit_byte(image, &pc, 0x3E); /* force the first main-window load */
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_LOADED_BANK_ADDRESS);
+  emit_byte(image, &pc, 0x2A); /* HL = current game descriptor */
+  emit_word(image, &pc, CURRENT_DESC_ADDRESS);
+  emit_byte(image, &pc, 0x11); /* descriptor +8 = bank stream table */
+  emit_word(image, &pc, 8);
+  emit_byte(image, &pc, 0x19);
+  emit_byte(image, &pc, 0x5E);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x56);
+  emit_byte(image, &pc, 0xEB); /* HL = compressed stream table */
+  emit_byte(image, &pc, 0xAF); /* table entry zero is the main window */
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, MERGED_BANK_LOADER_ADDRESS);
+
+  patch_relative(image, main_window_selected_jump, pc);
   emit_byte(image, &pc, 0x3E); /* 8K mapper pages initially use main RAM */
   emit_byte(image, &pc, 0xFF);
   emit_byte(image, &pc, 0x32);
   emit_word(image, &pc, CURRENT_8K_PAGE4_ADDRESS);
   emit_byte(image, &pc, 0x32);
   emit_word(image, &pc, CURRENT_8K_PAGE5_ADDRESS);
+  emit_byte(image, &pc, 0x3E); /* no compressed 16K source bank loaded */
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_LOADED_BANK_ADDRESS);
 
   loop_address = pc;
   emit_byte(image, &pc, 0x3A); /* while count != 0 */
@@ -808,9 +1024,37 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   emit_byte(image, &pc, 0xCA); /* JP Z,skip_chunk */
   skip_jump = pc;
   emit_word(image, &pc, 0);
+  /* A raw initial-image chunk is marked by copy_offset = FFFE.  Check the
+   * marker before treating the chunk as a ZX0 stream. */
+  emit_byte(image, &pc, 0x11);
+  emit_word(image, &pc, 5);
+  emit_byte(image, &pc, 0x19);
   emit_byte(image, &pc, 0x7E);
-  emit_byte(image, &pc, 0xD3);
   emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0xC2); /* JP NZ,compressed_chunk */
+  raw_check_low_jump = pc;
+  emit_word(image, &pc, 0);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0xC2); /* JP NZ,compressed_chunk */
+  raw_check_high_jump = pc;
+  emit_word(image, &pc, 0);
+  emit_byte(image, &pc, 0xCA); /* JP Z,raw_chunk */
+  raw_chunk_jump = pc;
+  emit_word(image, &pc, 0);
+
+  {
+    uint32_t compressed_chunk = pc;
+    patch_word(image, raw_check_low_jump, (uint16_t)compressed_chunk);
+    patch_word(image, raw_check_high_jump, (uint16_t)compressed_chunk);
+  }
+  emit_byte(image, &pc, 0x2A); /* reload the descriptor after the marker check */
+  emit_word(image, &pc, CURRENT_CHUNK_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x7E);
+  emit_select_compressed_bank(image, &pc, bank_mode);
   emit_byte(image, &pc, 0x23);
   emit_byte(image, &pc, 0x5E); /* source low */
   emit_byte(image, &pc, 0x23);
@@ -855,10 +1099,7 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   emit_word(image, &pc, 0xC000);
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, MERGED_DECODER_ADDRESS);
-  emit_byte(image, &pc, 0x3A); /* restore this game's raw main window */
-  emit_word(image, &pc, CURRENT_MAIN_BANK_ADDRESS);
-  emit_byte(image, &pc, 0xD3);
-  emit_byte(image, &pc, 0xFE);
+  emit_select_current_main_bank(image, &pc, bank_mode);
   emit_byte(image, &pc, 0x21); /* HL = scratch + copy offset */
   emit_word(image, &pc, 0xC000);
   emit_byte(image, &pc, 0xED);
@@ -896,6 +1137,69 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   emit_byte(image, &pc, 0xC3);
   emit_word(image, &pc, (uint16_t)loop_address);
 
+  raw_chunk_address = pc;
+  patch_word(image, raw_chunk_jump, (uint16_t)raw_chunk_address);
+  emit_byte(image, &pc, 0x2A); /* HL = raw chunk descriptor */
+  emit_word(image, &pc, CURRENT_CHUNK_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x7E); /* map the raw chunk bank */
+  emit_select_compressed_bank(image, &pc, bank_mode);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x5E); /* source low */
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x56); /* source high */
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x53);
+  emit_word(image, &pc, CURRENT_SOURCE_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x7E); /* destination low */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_DEST_ADDRESS);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x7E); /* destination high */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_DEST_ADDRESS + 1);
+  emit_byte(image, &pc, 0x23); /* copy offset low */
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COPY_OFFSET_ADDRESS);
+  emit_byte(image, &pc, 0x23); /* copy offset high */
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COPY_OFFSET_ADDRESS + 1);
+  emit_byte(image, &pc, 0x23); /* copy length low */
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COPY_LENGTH_ADDRESS);
+  emit_byte(image, &pc, 0x23); /* copy length high */
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COPY_LENGTH_ADDRESS + 1);
+  emit_byte(image, &pc, 0x23); /* next descriptor */
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x63);
+  emit_word(image, &pc, CURRENT_CHUNK_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x2A); /* HL = raw source */
+  emit_word(image, &pc, CURRENT_SOURCE_PTR_ADDRESS);
+  emit_byte(image, &pc, 0xED); /* DE = destination */
+  emit_byte(image, &pc, 0x5B);
+  emit_word(image, &pc, CURRENT_DEST_ADDRESS);
+  emit_byte(image, &pc, 0xED); /* BC = descriptor copy length */
+  emit_byte(image, &pc, 0x4B);
+  emit_word(image, &pc, CURRENT_COPY_LENGTH_ADDRESS);
+  emit_byte(image, &pc, 0x78);
+  emit_byte(image, &pc, 0xB1);
+  raw_copy_jump = pc;
+  emit_byte(image, &pc, 0x20); /* JR NZ, raw_copy */
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0x01); /* upper-memory chunks use the full 8K */
+  emit_word(image, &pc, INITIAL_CHUNK_SIZE);
+  patch_relative(image, raw_copy_jump, pc);
+  emit_byte(image, &pc, 0xED); /* copy raw bytes */
+  emit_byte(image, &pc, 0xB0);
+  emit_select_current_main_bank(image, &pc, bank_mode);
+  emit_byte(image, &pc, 0xC3);
+  emit_word(image, &pc, (uint16_t)decrement_address);
+
   direct_decode = pc;
   patch_word(image, direct_jump, (uint16_t)direct_decode);
   emit_byte(image, &pc, 0xED); /* DE = the direct upper-memory destination */
@@ -903,10 +1207,7 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   emit_word(image, &pc, CURRENT_DEST_ADDRESS);
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, MERGED_DECODER_ADDRESS);
-  emit_byte(image, &pc, 0x3A); /* restore this game's raw main window */
-  emit_word(image, &pc, CURRENT_MAIN_BANK_ADDRESS);
-  emit_byte(image, &pc, 0xD3);
-  emit_byte(image, &pc, 0xFE);
+  emit_select_current_main_bank(image, &pc, bank_mode);
   emit_byte(image, &pc, 0xC3);
   emit_word(image, &pc, (uint16_t)decrement_address);
 
@@ -926,10 +1227,29 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   emit_word(image, &pc, (uint16_t)loop_address);
 
   patch_word(image, done_jump, (uint16_t)pc);
-  emit_byte(image, &pc, 0x3A); /* keep the game's raw main window mapped */
-  emit_word(image, &pc, CURRENT_MAIN_BANK_ADDRESS);
-  emit_byte(image, &pc, 0xD3);
-  emit_byte(image, &pc, 0xFE);
+  emit_select_current_main_bank(image, &pc, bank_mode);
+  emit_byte(image, &pc, 0x2A); /* clear the temporary decode RAM when it is
+                                * outside the source image */
+  emit_word(image, &pc, CURRENT_DESC_ADDRESS);
+  for (int i = 0; i < 11; i++)
+    emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0xE6);
+  emit_byte(image, &pc, 0x01);
+  emit_byte(image, &pc, 0xCA); /* JP Z, no_clear */
+  clear_ram_jump = pc;
+  emit_word(image, &pc, 0);
+  emit_byte(image, &pc, 0xAF);
+  emit_byte(image, &pc, 0x21);
+  emit_word(image, &pc, 0xC000);
+  emit_byte(image, &pc, 0x11);
+  emit_word(image, &pc, 0xC001);
+  emit_byte(image, &pc, 0x01);
+  emit_word(image, &pc, 0x1FFF);
+  emit_byte(image, &pc, 0x77);
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0xB0); /* LDIR */
+  patch_word(image, clear_ram_jump, (uint16_t)pc);
   emit_byte(image, &pc, 0x2A); /* play address */
   emit_word(image, &pc, CURRENT_DESC_ADDRESS);
   emit_byte(image, &pc, 0x23);
@@ -999,7 +1319,609 @@ static int build_common_code(uint8_t *image, uint16_t *play_address) {
   return pc <= MERGED_DECODER_ADDRESS ? 0 : 1;
 }
 
-static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
+/* Emit a deliberately simple ZX0 decoder for source banks.  The compressed
+ * stream lives in a KSS ROM bank, while the decoded 16K bank must live in the
+ * writable MSX RAM window at 8000H.  The byte reader therefore briefly maps
+ * the compressed bank, fetches one byte, and maps RAM back before the decoder
+ * continues.  This is slow, but it preserves the source engine's C000H RAM
+ * and makes the archive usable by an ordinary 16K KSS player. */
+static int build_compressed_bank_loader(uint8_t *image) {
+  uint32_t pc = MERGED_BANK_LOADER_ADDRESS;
+  uint32_t cached_jump;
+  uint32_t decoder_call;
+  uint32_t read_byte;
+  uint32_t get_bit;
+  uint32_t elias;
+  uint32_t inverse_elias;
+  uint32_t backtracked_elias;
+  uint32_t copy_literals;
+  uint32_t copy_backref;
+  uint32_t decoder;
+  uint32_t after_copy;
+  uint32_t new_offset;
+  uint32_t literals;
+  uint32_t done;
+
+  /* Entry: A = source bank index, HL = this game's bank descriptor table. */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_REQUEST_BANK_ADDRESS);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_LOADED_BANK_ADDRESS);
+  emit_byte(image, &pc, 0x47); /* B = currently loaded source bank */
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_REQUEST_BANK_ADDRESS);
+  emit_byte(image, &pc, 0xB8); /* requested bank already in RAM? */
+  cached_jump = pc;
+  emit_byte(image, &pc, 0xCA);
+  emit_word(image, &pc, 0);
+
+  emit_byte(image, &pc, 0x5F); /* DE = index * 3 */
+  emit_byte(image, &pc, 0x16);
+  emit_byte(image, &pc, 0x00);
+  emit_byte(image, &pc, 0x19);
+  emit_byte(image, &pc, 0x19);
+  emit_byte(image, &pc, 0x19);
+  emit_byte(image, &pc, 0x7E); /* compressed KSS bank selector */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COMP_BANK_ADDRESS);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x5E); /* compressed stream address */
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x56);
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x53);
+  emit_word(image, &pc, CURRENT_SOURCE_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x3E); /* map writable main RAM at 8000H */
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0xD3);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0xAF); /* bit reader starts with a new byte */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0x32); /* no buffered compressed bytes yet */
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS + 1);
+  emit_byte(image, &pc, 0x21);
+  emit_word(image, &pc, 1);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS);
+  emit_byte(image, &pc, 0x11);
+  emit_word(image, &pc, 0x8000);
+  decoder_call = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, 0);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_REQUEST_BANK_ADDRESS);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_LOADED_BANK_ADDRESS);
+  emit_byte(image, &pc, 0xC9);
+
+  /* Cached path: the requested source bank is already in writable RAM. */
+  patch_word(image, cached_jump + 1, (uint16_t)pc);
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0xD3);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0xC9);
+
+  /* read_byte: refill a small RAM buffer from the compressed KSS bank, then
+   * return one byte while keeping BC and DE intact.  This avoids switching
+   * the mapper for every bit/literal and keeps the decompression delay usable
+   * on a Z80. */
+  read_byte = pc;
+  emit_byte(image, &pc, 0xC5); /* preserve BC */
+  emit_byte(image, &pc, 0xD5); /* preserve DE */
+  emit_byte(image, &pc, 0x2A);
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS);
+  emit_byte(image, &pc, 0x7C);
+  emit_byte(image, &pc, 0xB5);
+  uint32_t buffer_ready = pc;
+  emit_byte(image, &pc, 0x20);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_COMP_BANK_ADDRESS);
+  emit_byte(image, &pc, 0xD3);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0x2A);
+  emit_word(image, &pc, CURRENT_SOURCE_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x11);
+  emit_word(image, &pc, COMPRESSED_BUFFER_ADDRESS);
+  emit_byte(image, &pc, 0x01);
+  emit_word(image, &pc, 0x0100);
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0xB0); /* copy 256 compressed bytes to RAM */
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x63);
+  emit_word(image, &pc, CURRENT_SOURCE_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x21);
+  emit_word(image, &pc, COMPRESSED_BUFFER_ADDRESS);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_BUFFER_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x21);
+  emit_word(image, &pc, 0x0100);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS);
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0xFF);
+  emit_byte(image, &pc, 0xD3);
+  emit_byte(image, &pc, 0xFE);
+  patch_relative(image, buffer_ready, pc);
+  emit_byte(image, &pc, 0x2A);
+  emit_word(image, &pc, CURRENT_BUFFER_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x7E);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_BUFFER_PTR_ADDRESS);
+  emit_byte(image, &pc, 0x2A);
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS);
+  emit_byte(image, &pc, 0x2B);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
+  emit_byte(image, &pc, 0xD1); /* restore DE */
+  emit_byte(image, &pc, 0xC1); /* restore BC */
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
+  emit_byte(image, &pc, 0xC9);
+
+  /* get_bit: return the next compressed bit in carry, preserving BC. */
+  get_bit = pc;
+  emit_byte(image, &pc, 0xC5); /* PUSH BC */
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xB7);
+  uint32_t get_bit_have_mask = pc;
+  emit_byte(image, &pc, 0x20);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)read_byte);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BIT_BUFFER_ADDRESS);
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0x80);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  patch_relative(image, get_bit_have_mask, pc);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_BIT_BUFFER_ADDRESS);
+  emit_byte(image, &pc, 0x47);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xA0); /* A = mask & buffer */
+  emit_byte(image, &pc, 0xB7); /* normalize Z for all Z80 cores */
+  uint32_t get_bit_zero = pc;
+  emit_byte(image, &pc, 0x28);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x3F); /* SRL A */
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xC1);
+  emit_byte(image, &pc, 0x37); /* SCF */
+  emit_byte(image, &pc, 0xC9);
+  patch_relative(image, get_bit_zero, pc);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x3F);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_BIT_MASK_ADDRESS);
+  emit_byte(image, &pc, 0xC1);
+  emit_byte(image, &pc, 0xAF); /* clear carry */
+  emit_byte(image, &pc, 0xC9);
+
+  /* read_elias: interlaced Elias gamma, result in BC.  The bit following
+   * each zero separator is the next value bit, not an increment flag. */
+  elias = pc;
+  emit_byte(image, &pc, 0x01);
+  emit_word(image, &pc, 1);
+  uint32_t elias_loop = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  uint32_t elias_done = pc;
+  emit_byte(image, &pc, 0x38); /* separator/terminator */
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x11); /* RL C: carry is the value bit */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x10); /* RL B */
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+  patch_relative(image, elias_done, pc);
+  patch_relative(image, pc - 2, elias_loop);
+  emit_byte(image, &pc, 0xC9);
+
+  /* inverse_elias: same coding, but the value bits are inverted. */
+  inverse_elias = pc;
+  emit_byte(image, &pc, 0x01);
+  emit_word(image, &pc, 1);
+  uint32_t inverse_loop = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  uint32_t inverse_done = pc;
+  emit_byte(image, &pc, 0x38);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  emit_byte(image, &pc, 0x3F); /* CCF: invert the value bit */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x11); /* RL C */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x10); /* RL B */
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+  patch_relative(image, inverse_done, pc);
+  patch_relative(image, pc - 2, inverse_loop);
+  emit_byte(image, &pc, 0xC9);
+
+  /* The first bit of the length after a new offset is backtracked into the
+   * offset LSB.  CURRENT_COMP_BYTE contains that bit (0 or 1). */
+  backtracked_elias = pc;
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
+  emit_byte(image, &pc, 0xB7);
+  uint32_t backtracked_one = pc;
+  emit_byte(image, &pc, 0x20);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0x01);
+  emit_word(image, &pc, 1);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x11); /* first value bit */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x10);
+  uint32_t backtracked_loop = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  uint32_t backtracked_done = pc;
+  emit_byte(image, &pc, 0x38);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x11);
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x10);
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+  patch_relative(image, backtracked_done, pc);
+  patch_relative(image, pc - 2, backtracked_loop);
+  patch_relative(image, backtracked_one, pc);
+  emit_byte(image, &pc, 0xC9);
+
+  copy_literals = pc;
+  uint32_t copy_literals_loop = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)read_byte);
+  emit_byte(image, &pc, 0x12);
+  emit_byte(image, &pc, 0x13);
+  emit_byte(image, &pc, 0x0B);
+  emit_byte(image, &pc, 0x78);
+  emit_byte(image, &pc, 0xB1);
+  uint32_t copy_literals_done = pc;
+  emit_byte(image, &pc, 0x20);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xC9);
+  patch_relative(image, copy_literals_done, copy_literals_loop);
+
+  copy_backref = pc;
+  emit_byte(image, &pc, 0xC5);
+  emit_byte(image, &pc, 0xD5);
+  emit_byte(image, &pc, 0xDD);
+  emit_byte(image, &pc, 0xE1); /* IX = destination */
+  emit_byte(image, &pc, 0x2A);
+  emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS);
+  emit_byte(image, &pc, 0xDD);
+  emit_byte(image, &pc, 0xE5);
+  emit_byte(image, &pc, 0xD1); /* DE = destination */
+  emit_byte(image, &pc, 0xEB); /* HL = destination, DE = offset */
+  emit_byte(image, &pc, 0xAF);
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x52); /* HL -= DE */
+  emit_byte(image, &pc, 0xDD);
+  emit_byte(image, &pc, 0xE5);
+  emit_byte(image, &pc, 0xD1); /* restore destination */
+  emit_byte(image, &pc, 0xC1); /* restore length */
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0xB0);
+  emit_byte(image, &pc, 0xC9);
+
+  /* Decoder control flow mirrors the standard ZX0 routine. */
+  decoder = pc;
+  patch_word(image, decoder_call + 1, (uint16_t)decoder);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)elias);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)copy_literals);
+
+  uint32_t after_literal = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  uint32_t literal_to_new = pc;
+  emit_byte(image, &pc, 0x38);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)elias);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)copy_backref);
+  uint32_t last_to_after_copy = pc;
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+
+  uint32_t after_copy_label = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)get_bit);
+  uint32_t copy_to_literals = pc;
+  emit_byte(image, &pc, 0x30);
+  emit_byte(image, &pc, 0);
+  new_offset = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)inverse_elias);
+  emit_byte(image, &pc, 0x78);
+  emit_byte(image, &pc, 0xFE);
+  emit_byte(image, &pc, 0x01);
+  uint32_t not_end = pc;
+  emit_byte(image, &pc, 0x20);
+  emit_byte(image, &pc, 0);
+  emit_byte(image, &pc, 0x79);
+  emit_byte(image, &pc, 0xB7);
+  uint32_t end_jump = pc;
+  emit_byte(image, &pc, 0x28);
+  emit_byte(image, &pc, 0);
+  uint32_t offset_body = pc;
+  emit_byte(image, &pc, 0x0B); /* BC = offset MSB - 1 */
+  emit_byte(image, &pc, 0xC5);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)read_byte);
+  emit_byte(image, &pc, 0x4F); /* C = encoded offset LSB */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x39); /* SRL C; carry is backtracked length bit */
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0x00);
+  emit_byte(image, &pc, 0xCE); /* A = raw LSB bit 0 */
+  emit_byte(image, &pc, 0x00);
+  emit_byte(image, &pc, 0x32);
+  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
+  emit_byte(image, &pc, 0x3E);
+  emit_byte(image, &pc, 0x7F);
+  emit_byte(image, &pc, 0x91); /* A = 127 - (raw LSB >> 1) */
+  emit_byte(image, &pc, 0x06);
+  emit_byte(image, &pc, 0x00);
+  emit_byte(image, &pc, 0x4F);
+  emit_byte(image, &pc, 0xE1); /* HL = offset MSB - 1 */
+  for (int i = 0; i < 7; i++)
+    emit_byte(image, &pc, 0x29);
+  emit_byte(image, &pc, 0x09);
+  emit_byte(image, &pc, 0x23);
+  emit_byte(image, &pc, 0x22);
+  emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)backtracked_elias);
+  emit_byte(image, &pc, 0x03);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)copy_backref);
+  uint32_t new_to_after_copy = pc;
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+
+  done = pc;
+  emit_byte(image, &pc, 0xC9);
+
+  literals = pc;
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)elias);
+  emit_byte(image, &pc, 0xCD);
+  emit_word(image, &pc, (uint16_t)copy_literals);
+  uint32_t literals_to_after_copy = pc;
+  emit_byte(image, &pc, 0x18);
+  emit_byte(image, &pc, 0);
+
+  patch_relative(image, literal_to_new, new_offset);
+  patch_relative(image, last_to_after_copy, after_copy_label);
+  patch_relative(image, copy_to_literals, literals);
+  patch_relative(image, new_to_after_copy, after_copy_label);
+  patch_relative(image, literals_to_after_copy, after_copy_label);
+  patch_relative(image, end_jump, done);
+  patch_relative(image, not_end, offset_body);
+  (void)after_literal;
+  (void)literals_to_after_copy;
+
+  if (pc >= MERGED_VARIABLE_ADDRESS) {
+    fprintf(stderr, "compressed bank loader overlaps merged variables\n");
+    return 1;
+  }
+  return 0;
+}
+
+static void emit_load_compressed_main_window(uint8_t *image, uint32_t *p,
+                                             const GAME *game) {
+  emit_byte(image, p, 0x21); /* HL = combined main/source descriptor table */
+  emit_word(image, p, game->bank_descriptor_address);
+  emit_byte(image, p, 0xAF); /* descriptor zero is the main window */
+  emit_byte(image, p, 0xCD);
+  emit_word(image, p, MERGED_BANK_LOADER_ADDRESS);
+}
+
+static void emit_compressed_16k_selector(uint8_t *image, uint32_t *p,
+                                         const GAME *game) {
+  uint32_t jump_low;
+  uint32_t jump_high;
+  uint32_t jump_invalid;
+  uint32_t invalid;
+  uint32_t after_map;
+
+  /* The mapper write has no architectural register side effects.  Preserve
+   * all registers while the deliberately slow loader runs. */
+  emit_byte(image, p, 0xED);
+  emit_byte(image, p, 0x73); /* save the source stack pointer */
+  emit_word(image, p, CURRENT_SAVED_SP_ADDRESS);
+  emit_byte(image, p, 0x31); /* the default VM stack overlaps the loader */
+  emit_word(image, p, 0xF5A0);
+  emit_byte(image, p, 0xF5); /* AF */
+  emit_byte(image, p, 0xC5); /* BC */
+  emit_byte(image, p, 0xD5); /* DE */
+  emit_byte(image, p, 0xE5); /* HL */
+  emit_byte(image, p, 0xDD);
+  emit_byte(image, p, 0xE5); /* IX */
+  emit_byte(image, p, 0xFD);
+  emit_byte(image, p, 0xE5); /* IY */
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, game->bank_offset);
+  jump_low = *p;
+  emit_byte(image, p, 0x38); /* JR C, invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, (uint8_t)(game->bank_offset + game->compressed_bank_count));
+  jump_high = *p;
+  emit_byte(image, p, 0x30); /* JR NC, invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xD6);
+  emit_byte(image, p, game->bank_offset);
+  if (game->main_window_compressed)
+    emit_byte(image, p, 0x3C); /* descriptor zero is reserved for main RAM */
+  emit_byte(image, p, 0x21); /* HL = compressed bank descriptor table */
+  emit_word(image, p, game->bank_descriptor_address);
+  emit_byte(image, p, 0xCD);
+  emit_word(image, p, MERGED_BANK_LOADER_ADDRESS);
+  jump_invalid = *p;
+  emit_byte(image, p, 0x18);
+  emit_byte(image, p, 0);
+
+  invalid = *p;
+  patch_relative(image, jump_low, invalid);
+  patch_relative(image, jump_high, invalid);
+  if (game->main_window_compressed) {
+    emit_load_compressed_main_window(image, p, game);
+  } else {
+    emit_byte(image, p, 0x3E);
+    emit_byte(image, p, game->main_bank);
+    emit_byte(image, p, 0xD3);
+    emit_byte(image, p, 0xFE);
+    emit_byte(image, p, 0x3E);
+    emit_byte(image, p, 0xFF);
+    emit_byte(image, p, 0x32);
+    emit_word(image, p, CURRENT_LOADED_BANK_ADDRESS);
+  }
+  after_map = *p;
+  patch_relative(image, jump_invalid, after_map);
+
+  emit_byte(image, p, 0xFD);
+  emit_byte(image, p, 0xE1); /* IY */
+  emit_byte(image, p, 0xDD);
+  emit_byte(image, p, 0xE1); /* IX */
+  emit_byte(image, p, 0xE1); /* HL */
+  emit_byte(image, p, 0xD1); /* DE */
+  emit_byte(image, p, 0xC1); /* BC */
+  emit_byte(image, p, 0xF1); /* AF */
+  emit_byte(image, p, 0xED);
+  emit_byte(image, p, 0x7B); /* restore the source stack pointer */
+  emit_word(image, p, CURRENT_SAVED_SP_ADDRESS);
+}
+
+/* Emit a mapper replacement for an original 16K selector while the merged
+ * archive uses two 8K pages.  A valid source selector becomes two adjacent
+ * output selectors; an invalid selector has the original 16K KSS semantics
+ * and falls back to this game's main window. */
+static void emit_16k_selector_as_8k(uint8_t *image, uint32_t *p,
+                                    const GAME *game, uint32_t global_bank) {
+  uint32_t jump_low;
+  uint32_t jump_high;
+  uint32_t jump_invalid;
+  uint32_t invalid;
+  uint32_t after_map;
+
+  emit_byte(image, p, 0xF5); /* preserve source A and flags */
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, game->bank_offset);
+  jump_low = *p;
+  emit_byte(image, p, 0x38); /* JR C,invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, (uint8_t)(game->bank_offset + game->bank_count));
+  jump_high = *p;
+  emit_byte(image, p, 0x30); /* JR NC,invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xD6);
+  emit_byte(image, p, game->bank_offset);
+  emit_byte(image, p, 0x87); /* ADD A,A: 16K bank n -> 8K pair 2*n */
+  emit_byte(image, p, 0xC6);
+  emit_byte(image, p, (uint8_t)global_bank);
+  emit_byte(image, p, 0x32);
+  emit_word(image, p, 0x9000);
+  emit_byte(image, p, 0x3C);
+  emit_byte(image, p, 0x32);
+  emit_word(image, p, 0xB000);
+  jump_invalid = *p;
+  emit_byte(image, p, 0x18); /* JR after_map */
+  emit_byte(image, p, 0);
+  invalid = *p;
+  patch_relative(image, jump_low, invalid);
+  patch_relative(image, jump_high, invalid);
+  emit_byte(image, p, 0x3E);
+  emit_byte(image, p, game->main_bank);
+  emit_byte(image, p, 0x32);
+  emit_word(image, p, 0x9000);
+  emit_byte(image, p, 0x3C);
+  emit_byte(image, p, 0x32);
+  emit_word(image, p, 0xB000);
+  after_map = *p;
+  patch_relative(image, jump_invalid, after_map);
+  emit_byte(image, p, 0xF1);
+}
+
+/* Emit a mapper replacement for an original 8K selector in a merged 8K
+ * archive.  Invalid selectors are written unchanged, which leaves the
+ * player's unmapped/dummy-bank behavior intact. */
+static void emit_8k_selector_as_8k(uint8_t *image, uint32_t *p,
+                                   const GAME *game, uint32_t global_bank,
+                                   uint8_t mapper_port) {
+  uint32_t jump_low;
+  uint32_t jump_high;
+  uint32_t jump_invalid;
+  uint32_t invalid;
+  uint32_t after_map;
+
+  emit_byte(image, p, 0xF5); /* preserve source A and flags */
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, game->bank_offset);
+  jump_low = *p;
+  emit_byte(image, p, 0x38); /* JR C,invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xFE);
+  emit_byte(image, p, (uint8_t)(game->bank_offset + game->bank_count));
+  jump_high = *p;
+  emit_byte(image, p, 0x30); /* JR NC,invalid */
+  emit_byte(image, p, 0);
+  emit_byte(image, p, 0xD6);
+  emit_byte(image, p, game->bank_offset);
+  emit_byte(image, p, 0xC6);
+  emit_byte(image, p, (uint8_t)global_bank);
+  emit_byte(image, p, 0x32);
+  emit_byte(image, p, 0x00);
+  emit_byte(image, p, mapper_port);
+  jump_invalid = *p;
+  emit_byte(image, p, 0x18); /* JR after_map */
+  emit_byte(image, p, 0);
+  invalid = *p;
+  patch_relative(image, jump_low, invalid);
+  patch_relative(image, jump_high, invalid);
+  emit_byte(image, p, 0x32);
+  emit_byte(image, p, 0x00);
+  emit_byte(image, p, mapper_port); /* A is still the original selector */
+  after_map = *p;
+  patch_relative(image, jump_invalid, after_map);
+  emit_byte(image, p, 0xF1);
+}
+
+static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image,
+                            uint8_t output_bank_mode) {
   uint32_t i;
   uint32_t cursor = MERGED_STUB_ADDRESS;
 
@@ -1076,7 +1998,11 @@ static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
 
         /* Normalize the 16K selector, preserving A and flags until the
          * source's following XOR A. */
-        {
+        if (output_bank_mode == 8) {
+          emit_16k_selector_as_8k(image, &p, &games[i], global_bank);
+        } else if (games[i].compressed_bank_count != 0) {
+          emit_compressed_16k_selector(image, &p, &games[i]);
+        } else {
           uint32_t jump_low;
           uint32_t jump_high;
           uint32_t jump_invalid;
@@ -1111,8 +2037,8 @@ static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
           emit_byte(image, &p, 0xFE);
           after_map = p;
           patch_relative(image, jump_invalid, after_map);
+          emit_byte(image, &p, 0xF1);
         }
-        emit_byte(image, &p, 0xF1);
         for (uint32_t k = 0; k < patch->next_length; k++)
           emit_byte(image, &p, patch->next[k]);
         emit_byte(image, &p, 0xC3);
@@ -1129,6 +2055,9 @@ static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
         games[i].initial[patch->image_offset + 1] = 0xC9;
         games[i].initial[patch->image_offset + 2] = 0xC9;
         continue;
+      } else if (games[i].bank_mode == 8 && output_bank_mode == 8) {
+        emit_8k_selector_as_8k(image, &p, &games[i], global_bank,
+                               patch->mapper_port);
       } else if (games[i].bank_mode == 8) {
         uint32_t jump_low;
         uint32_t jump_high;
@@ -1236,6 +2165,10 @@ static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
         emit_byte(image, &p, 0x32); /* preserve SCC/memory side effect */
         emit_byte(image, &p, 0x00);
         emit_byte(image, &p, patch->mapper_port);
+      } else if (output_bank_mode == 8) {
+        emit_16k_selector_as_8k(image, &p, &games[i], global_bank);
+      } else if (games[i].compressed_bank_count != 0) {
+        emit_compressed_16k_selector(image, &p, &games[i]);
       } else {
         uint32_t jump_low;
         uint32_t jump_high;
@@ -1289,9 +2222,22 @@ static int patch_bank_stubs(GAME *games, uint32_t game_count, uint8_t *image) {
   return 0;
 }
 
-static int compress_source_images(GAME *games, uint32_t game_count, BANK_PACK *pack) {
+static uint32_t bank_pack_add_raw_chunk(BANK_PACK *pack, const uint8_t *data,
+                                        uint16_t *source) {
+  uint8_t raw_bank[KSS_BANK_SIZE_16K];
+  uint32_t bank;
+
+  memset(raw_bank, 0xC9, sizeof(raw_bank));
+  memcpy(raw_bank, data, KSS_BANK_SIZE_8K);
+  bank = bank_pack_add_raw(pack, raw_bank);
+  if (bank && source)
+    *source = 0x8000;
+  return bank;
+}
+
+static int compress_source_images(GAME *games, uint32_t game_count,
+                                  BANK_PACK *pack, int compress_data) {
   uint32_t i;
-  pack->stream_offset = 0;
   for (i = 0; i < game_count; i++) {
     uint32_t j;
     games[i].chunk_count = games[i].initial_size / INITIAL_CHUNK_SIZE;
@@ -1308,8 +2254,42 @@ static int compress_source_images(GAME *games, uint32_t game_count, BANK_PACK *p
       uint32_t end = destination + INITIAL_CHUNK_SIZE;
 
       if (destination >= 0x8000 && end <= 0xC000) {
-        /* This part is supplied by the game's raw main-window bank. */
+        /* This part is supplied by the game's main window, either by a raw
+         * bank or by the optional compressed-main loader. */
         games[i].chunks[j].bank = 0;
+        continue;
+      }
+      if (!compress_data || pack->bank_mode != 16) {
+        bank = bank_pack_add_raw_chunk(pack, games[i].initial + j * INITIAL_CHUNK_SIZE,
+                                       &source);
+        if (!bank) {
+          fprintf(stderr, "%s: could not pack raw initial chunk %u\n",
+                  games[i].name, (unsigned)j);
+          return 1;
+        }
+        games[i].chunks[j].bank = (uint8_t)bank;
+        games[i].chunks[j].copy_offset = CHUNK_RAW_OFFSET;
+        if (destination < 0x8000) {
+          /* Copy the lower part only; the main-window bank supplies any
+           * remainder when this chunk crosses 8000H. */
+          games[i].chunks[j].source = source;
+          games[i].chunks[j].destination = (uint16_t)destination;
+          games[i].chunks[j].copy_length =
+              (uint16_t)((end < 0x8000 ? end : 0x8000) - destination);
+        } else if (destination < 0xC000) {
+          /* A chunk crossing C000H has its lower part in the main window.
+           * Point the raw copy at the upper tail inside the packed chunk. */
+          games[i].chunks[j].source =
+              (uint16_t)(source + (0xC000 - destination));
+          games[i].chunks[j].destination = 0xC000;
+          games[i].chunks[j].copy_length =
+              (uint16_t)(end - 0xC000);
+        } else {
+          /* Chunks wholly above the main window must be copied in full. */
+          games[i].chunks[j].source = source;
+          games[i].chunks[j].destination = (uint16_t)destination;
+          games[i].chunks[j].copy_length = INITIAL_CHUNK_SIZE;
+        }
         continue;
       }
       if (!zx0_compress_data(games[i].initial + j * INITIAL_CHUNK_SIZE,
@@ -1382,14 +2362,6 @@ static void make_track_title(const GAME *game, const TRACK_META *track,
     }
     append_title(destination, size, ")");
   }
-  if (game->meta.chips[0]) {
-    snprintf(suffix, sizeof(suffix), " [chips: %s]", game->meta.chips);
-    append_title(destination, size, suffix);
-  }
-  if (game->meta.composers[0]) {
-    snprintf(suffix, sizeof(suffix), " [composers: %s]", game->meta.composers);
-    append_title(destination, size, suffix);
-  }
   if (game->meta.japanese_title[0]) {
     snprintf(suffix, sizeof(suffix), " [JP: %s]", game->meta.japanese_title);
     append_title(destination, size, suffix);
@@ -1407,11 +2379,6 @@ static uint32_t collect_tracks(GAME *games, uint32_t game_count,
       TRACK_META *track = &games[i].track_meta[id];
       if (!track->valid)
         continue;
-      if (track->seconds < 10) {
-        fprintf(stderr, "skipping %s track %d: duration %d seconds (<10)\n",
-                games[i].name, id, track->seconds);
-        continue;
-      }
       if (count >= KSS_MAX_TRACKS) {
         fprintf(stderr, "skipping %s track %d: KSS song limit reached\n",
                 games[i].name, id);
@@ -1470,17 +2437,55 @@ static int write_merged_metadata(uint8_t *image, GAME *games, uint32_t game_coun
     image[descriptor - MERGED_LOAD_ADDRESS + 2] = (uint8_t)games[i].chunk_count;
     set_word(image, descriptor - MERGED_LOAD_ADDRESS + 3, games[i].init_address);
     set_word(image, descriptor - MERGED_LOAD_ADDRESS + 5, games[i].play_address);
+    /* Byte 7 is the raw main-bank selector, or FF when that window is
+     * supplied by the first entry in the compressed-bank table.  Byte 11
+     * records whether the temporary C000H scratch area is outside the source
+     * image and must be cleared before the source init routine runs. */
     image[descriptor - MERGED_LOAD_ADDRESS + 7] = games[i].main_bank;
-    for (j = 0; j < games[i].chunk_count; j++) {
-      uint32_t offset = chunk_descriptor - MERGED_LOAD_ADDRESS + j * CHUNK_DESCRIPTOR_SIZE;
-      image[offset] = games[i].chunks[j].bank;
-      set_word(image, offset + 1, games[i].chunks[j].source);
-      set_word(image, offset + 3, games[i].chunks[j].destination);
-      set_word(image, offset + 5, games[i].chunks[j].copy_offset);
-      set_word(image, offset + 7, games[i].chunks[j].copy_length);
+    image[descriptor - MERGED_LOAD_ADDRESS + 11] =
+        (uint8_t)((uint32_t)games[i].load_address + games[i].initial_size <= 0xC000
+                      ? 1
+                      : 0);
+    set_word(image, descriptor - MERGED_LOAD_ADDRESS + 8, 0);
+    image[descriptor - MERGED_LOAD_ADDRESS + 10] = 0;
+    if (games[i].chunks) {
+      for (j = 0; j < games[i].chunk_count; j++) {
+        uint32_t offset = chunk_descriptor - MERGED_LOAD_ADDRESS + j * CHUNK_DESCRIPTOR_SIZE;
+        image[offset] = games[i].chunks[j].bank;
+        set_word(image, offset + 1, games[i].chunks[j].source);
+        set_word(image, offset + 3, games[i].chunks[j].destination);
+        set_word(image, offset + 5, games[i].chunks[j].copy_offset);
+        set_word(image, offset + 7, games[i].chunks[j].copy_length);
+      }
     }
     descriptor += GAME_DESCRIPTOR_SIZE;
     chunk_descriptor += games[i].chunk_count * CHUNK_DESCRIPTOR_SIZE;
+  }
+  for (i = 0; i < game_count; i++) {
+    uint32_t j;
+    uint32_t descriptor_offset;
+    {
+      uint32_t descriptor_count = games[i].compressed_bank_count +
+                                   (games[i].main_window_compressed ? 1 : 0);
+      games[i].bank_descriptor_address =
+          descriptor_count ? (uint16_t)chunk_descriptor : 0;
+      descriptor_offset = games[i].descriptor_address - MERGED_LOAD_ADDRESS;
+      set_word(image, descriptor_offset + 8, games[i].bank_descriptor_address);
+      image[descriptor_offset + 10] = (uint8_t)descriptor_count;
+      if (games[i].main_window_compressed) {
+        uint32_t offset = chunk_descriptor - MERGED_LOAD_ADDRESS;
+        image[offset] = games[i].main_window_stream.bank;
+        set_word(image, offset + 1, games[i].main_window_stream.source);
+        chunk_descriptor += BANK_DESCRIPTOR_SIZE;
+      }
+    }
+    for (j = 0; j < games[i].compressed_bank_count; j++) {
+      uint32_t offset = chunk_descriptor - MERGED_LOAD_ADDRESS +
+                        j * BANK_DESCRIPTOR_SIZE;
+      image[offset] = games[i].compressed_banks[j].bank;
+      set_word(image, offset + 1, games[i].compressed_banks[j].source);
+    }
+    chunk_descriptor += games[i].compressed_bank_count * BANK_DESCRIPTOR_SIZE;
   }
   if (chunk_descriptor > MERGED_TRACK_TABLE_ADDRESS) {
     fprintf(stderr, "chunk descriptor end 0x%04X, track table 0x%04X\n",
@@ -1499,16 +2504,19 @@ static int write_merged_metadata(uint8_t *image, GAME *games, uint32_t game_coun
 
 static void write_header(uint8_t *data, uint16_t play_address,
                          uint32_t bank_count, uint32_t info_offset,
-                         uint32_t track_count) {
+                         uint32_t track_count, uint8_t bank_mode,
+                         int ram_mode) {
   memcpy(data, "KSSX", 4);
   set_word(data, 4, MERGED_LOAD_ADDRESS);
   set_word(data, 6, KSS_MAX_LOAD_SIZE);
   set_word(data, 8, MERGED_INIT_ADDRESS);
   set_word(data, 0x0A, play_address);
   data[0x0C] = KSS_BANK_OFFSET;
-  data[0x0D] = (uint8_t)bank_count; /* common archive uses 16K banks */
+  data[0x0D] = (uint8_t)(bank_count | (bank_mode == 8 ? 0x80 : 0));
   data[0x0E] = 0x10;
-  data[0x0F] = 0x00; /* MSX PSG/SCC, NTSC */
+  /* Device flag bit 2 is libkss's MSX RAM-mode flag, which also disables SCC
+   * for 16K KSS files.  Raw archives must stay in normal MSX PSG/SCC mode. */
+  data[0x0F] = (uint8_t)(ram_mode ? 0x04 : 0x00);
   set_dword(data, 0x10, info_offset);
   set_dword(data, 0x14, 0);
   set_word(data, 0x18, 0);
@@ -1545,28 +2553,41 @@ static OUTPUT_KSS *build_output(GAME *games, uint32_t game_count,
     set_word(decoder, 32, (uint16_t)(MERGED_DECODER_ADDRESS + 0x36));
     set_word(decoder, 48, (uint16_t)(MERGED_DECODER_ADDRESS + 0x3D));
   }
-  if (build_common_code(image, (uint16_t *)&play_address)) {
+  if (build_common_code(image, (uint16_t *)&play_address, pack->bank_mode)) {
     fprintf(stderr, "common dispatcher overlaps decoder\n");
+    goto cleanup;
+  }
+  for (uint32_t i = 0; i < game_count; i++) {
+    if (games[i].compressed_bank_count != 0 || games[i].main_window_compressed) {
+      if (build_compressed_bank_loader(image))
+        goto cleanup;
+      break;
+    }
+  }
+  /* Lay out the final metadata addresses before emitting bank stubs.  The
+   * initial image chunks are compressed below, but their count is fixed by
+   * the rounded initial image size and is enough to locate bank descriptors. */
+  for (uint32_t i = 0; i < game_count; i++)
+    games[i].chunk_count = games[i].initial_size / INITIAL_CHUNK_SIZE;
+  if (write_merged_metadata(image, games, game_count, tracks, track_count)) {
+    fprintf(stderr, "metadata tables overlap the track table\n");
+    goto cleanup;
+  }
+  if (patch_bank_stubs(games, game_count, image, pack->bank_mode)) {
+    fprintf(stderr, "bank-switch stubs overlap merged variables\n");
+    goto cleanup;
+  }
+  if (compress_source_images(games, game_count, pack,
+                            pack->bank_mode == 16 && pack->compression_enabled)) {
+    fprintf(stderr, "could not compress or pack source images\n");
     goto cleanup;
   }
   if (write_merged_metadata(image, games, game_count, tracks, track_count)) {
     fprintf(stderr, "metadata tables overlap the track table\n");
     goto cleanup;
   }
-  if (patch_bank_stubs(games, game_count, image)) {
-    fprintf(stderr, "bank-switch stubs overlap merged variables\n");
-    goto cleanup;
-  }
-  if (compress_source_images(games, game_count, pack)) {
-    fprintf(stderr, "could not compress or pack source images\n");
-    goto cleanup;
-  }
-  if (write_merged_metadata(image, games, game_count, tracks, track_count)) {
-    fprintf(stderr, "compressed chunk metadata overlaps the track table\n");
-    goto cleanup;
-  }
 
-  info_offset = KSS_MAX_LOAD_SIZE + pack->count * KSS_BANK_SIZE;
+  info_offset = KSS_MAX_LOAD_SIZE + pack->count * pack->bank_size;
   total_size = KSS_HEADER_SIZE + info_offset + info_size(tracks, track_count);
   result = (OUTPUT_KSS *)calloc(1, sizeof(*result));
   if (!result)
@@ -1579,10 +2600,11 @@ static OUTPUT_KSS *build_output(GAME *games, uint32_t game_count,
   }
   result->size = total_size;
   memset(result->data, 0xC9, total_size);
-  write_header(result->data, (uint16_t)play_address, pack->count, info_offset, track_count);
+  write_header(result->data, (uint16_t)play_address, pack->count, info_offset,
+               track_count, pack->bank_mode, pack->compression_enabled);
   memcpy(result->data + KSS_HEADER_SIZE, image, KSS_MAX_LOAD_SIZE);
   memcpy(result->data + KSS_HEADER_SIZE + KSS_MAX_LOAD_SIZE,
-         pack->data, pack->count * KSS_BANK_SIZE);
+         pack->data, pack->count * pack->bank_size);
   write_info(result->data + KSS_HEADER_SIZE + info_offset, tracks, track_count);
 
 cleanup:
@@ -1596,9 +2618,175 @@ static void free_games(GAME *games, uint32_t count) {
     free(games[i].file_data);
     free(games[i].initial);
     free(games[i].chunks);
+    free(games[i].compressed_banks);
     free(games[i].patches);
   }
   free(games);
+}
+
+/* Build a shallow, contiguous view of the games for one output archive.  The
+ * source buffers remain owned by the scanned GAME array; only the per-build
+ * patch/chunk arrays are owned by this view.  Keeping the view contiguous is
+ * important because the runtime metadata stores game indices as pointer
+ * differences. */
+static GAME *select_games(const GAME *all_games, uint32_t all_count,
+                          uint8_t output_mode, int auto_mode,
+                          uint32_t *selected_count) {
+  GAME *selected;
+  uint32_t i;
+  uint32_t count = 0;
+  uint32_t out = 0;
+
+  for (i = 0; i < all_count; i++) {
+    if (!auto_mode || all_games[i].bank_mode == output_mode)
+      count++;
+  }
+  *selected_count = count;
+  if (count == 0)
+    return NULL;
+
+  selected = (GAME *)calloc(count, sizeof(*selected));
+  if (!selected)
+    return NULL;
+  for (i = 0; i < all_count; i++) {
+    if (!auto_mode || all_games[i].bank_mode == output_mode) {
+      selected[out] = all_games[i];
+      selected[out].global_bank_base = 0;
+      selected[out].main_bank = 0;
+      selected[out].main_window_compressed = 0;
+      selected[out].main_window_stream.bank = 0;
+      selected[out].main_window_stream.source = 0;
+      selected[out].combo_options = 0;
+      selected[out].chunk_count = 0;
+      selected[out].chunks = NULL;
+      selected[out].compressed_bank_count = 0;
+      selected[out].compressed_banks = NULL;
+      selected[out].bank_descriptor_address = 0;
+      selected[out].patches = NULL;
+      selected[out].patch_count = 0;
+      selected[out].descriptor_address = 0;
+      out++;
+    }
+  }
+  return selected;
+}
+
+static void free_selected_games(GAME *games, uint32_t count) {
+  uint32_t i;
+  if (!games)
+    return;
+  for (i = 0; i < count; i++) {
+    free(games[i].chunks);
+    free(games[i].compressed_banks);
+    free(games[i].patches);
+  }
+  free(games);
+}
+
+static void make_mode_output_path(char *destination, size_t size,
+                                  const char *output, uint8_t mode) {
+  char stem[1024];
+  size_t length;
+
+  snprintf(stem, sizeof(stem), "%s", output);
+  length = strlen(stem);
+  if (length >= 4 && strcasecmp(stem + length - 4, ".kss") == 0)
+    stem[length - 4] = '\0';
+  length = strlen(stem);
+  if (length >= 3 && strcasecmp(stem + length - 3, "-8k") == 0)
+    stem[length - 3] = '\0';
+  else if (length >= 4 && strcasecmp(stem + length - 4, "-16k") == 0)
+    stem[length - 4] = '\0';
+  snprintf(destination, size, "%s-%uk.kss", stem, (unsigned)mode);
+}
+
+static int build_mode_output(const GAME *all_games, uint32_t all_count,
+                             uint8_t output_mode, int auto_mode,
+                             const char *output_path,
+                             int compress_data) {
+  GAME *games = NULL;
+  uint32_t game_count = 0;
+  OUTPUT_TRACK tracks[KSS_MAX_TRACKS];
+  uint32_t track_count;
+  BANK_PACK pack = {0};
+  OUTPUT_KSS *kss = NULL;
+  uint32_t i;
+  int result = 1;
+
+  games = select_games(all_games, all_count, output_mode, auto_mode,
+                       &game_count);
+  if (game_count == 0)
+    return 0;
+  if (!games) {
+    fprintf(stderr, "could not allocate the %uK game selection\n",
+            (unsigned)output_mode);
+    return 1;
+  }
+
+  track_count = collect_tracks(games, game_count, tracks);
+  if (track_count == 0) {
+    fprintf(stderr, "no tracks fit the %uK KSS song range\n",
+            (unsigned)output_mode);
+    goto cleanup;
+  }
+  fprintf(stderr, "selected %u %uK tracks from %u games\n",
+          (unsigned)track_count, (unsigned)output_mode, (unsigned)game_count);
+  pack.bank_mode = output_mode;
+  pack.bank_size = output_mode == 8 ? KSS_BANK_SIZE_8K : KSS_BANK_SIZE_16K;
+  pack.compression_enabled = (uint8_t)(compress_data && output_mode == 16);
+  fprintf(stderr, "output bank mode: %uK\n", (unsigned)output_mode);
+  if (prepare_sources(games, game_count, &pack, pack.compression_enabled))
+    goto cleanup;
+  if (compress_source_banks(games, game_count, &pack,
+                            pack.compression_enabled))
+    goto cleanup;
+  if (pack.compression_enabled)
+    fprintf(stderr, "ZX0 compression: enabled for the 16K output\n");
+  else
+    fprintf(stderr, "ZX0 compression: disabled; storing raw banks and images\n");
+  fprintf(stderr, "reserved %u raw %uK source banks\n", (unsigned)pack.raw_count,
+          (unsigned)output_mode);
+  for (i = 0; i < track_count; i++)
+    fprintf(stderr, "adding %uK track %u: %s\n", (unsigned)output_mode,
+            (unsigned)i, tracks[i].title);
+  if (pack.compression_enabled)
+    fprintf(stderr, "compressing %u game images with ZX0...\n",
+            (unsigned)game_count);
+  else
+    fprintf(stderr, "packing %u game images without compression...\n",
+            (unsigned)game_count);
+  kss = build_output(games, game_count, tracks, track_count, &pack);
+  if (!kss) {
+    fprintf(stderr, "failed to build merged VGM Up %uK KSS\n",
+            (unsigned)output_mode);
+    goto cleanup;
+  }
+  {
+    uint32_t stream_banks = pack.count - pack.raw_count;
+    uint32_t stream_bytes = stream_banks
+                                ? (stream_banks - 1) * pack.bank_size + pack.stream_offset
+                                : 0;
+    uint32_t stream_padding = stream_banks * pack.bank_size - stream_bytes;
+    fprintf(stderr, "packed %u raw banks + %u stream banks: %u compressed bytes, "
+                    "%u bank-padding bytes\n",
+            (unsigned)pack.raw_count, (unsigned)stream_banks,
+            (unsigned)stream_bytes, (unsigned)stream_padding);
+  }
+  if (write_file(output_path, kss->data, kss->size))
+    goto cleanup;
+  printf("wrote %s (%uK, %u tracks, %u banks, %u bytes)\n", output_path,
+         (unsigned)output_mode, (unsigned)track_count, (unsigned)pack.count,
+         (unsigned)kss->size);
+  result = 0;
+
+cleanup:
+  if (kss) {
+    free(kss->data);
+    free(kss);
+  }
+  free(pack.data);
+  free_selected_games(games, game_count);
+  return result;
 }
 
 static int scan_games(const char *directory, GAME **games_out, uint32_t *count_out) {
@@ -1670,38 +2858,62 @@ static int scan_games(const char *directory, GAME **games_out, uint32_t *count_o
 }
 
 static void usage(const char *program) {
-  fprintf(stderr, "Usage: %s [-o output.kss] [vigamup-directory]\n", program);
+  fprintf(stderr, "Usage: %s [--8k|--16k] [--compress-main-windows] [-o output-prefix] [vigamup-directory]\n", program);
   fprintf(stderr, "Default directory: vigamup\n");
-  fprintf(stderr, "Tracks shorter than 10 seconds are skipped; source songs follow gameinfo tracks_to_play.\n");
+  fprintf(stderr, "Default output: vigamup-8k.kss and vigamup-16k.kss.\n");
+  fprintf(stderr, "Default mode: auto-detect each source KSS bank mode.\n");
+  fprintf(stderr, "--8k or --16k forces one output mapper mode and allows cross-conversion.\n");
+  fprintf(stderr, "--compress-main-windows enables all ZX0 compression in the 16K output, including initial 8000H-BFFFH windows; raw by default.\n");
+  fprintf(stderr, "All valid tracks are included; only the 256-song KSS limit can skip tracks.\n");
 }
 
 int main(int argc, char **argv) {
-  const char *output = "vigamup.kss";
+  const char *output = "vigamup";
   const char *directory = "vigamup";
   GAME *games = NULL;
-  OUTPUT_TRACK tracks[KSS_MAX_TRACKS];
   uint32_t game_count = 0;
-  uint32_t track_count;
-  uint32_t i;
-  BANK_PACK pack = {0};
-  OUTPUT_KSS *kss = NULL;
   int first_argument = 1;
+  uint8_t forced_bank_mode = 0;
+  int compress_main_windows = 0;
+  int built = 0;
   int result = 1;
 
-  if (argc > 1 && strcmp(argv[1], "-h") == 0) {
-    usage(argv[0]);
-    return 0;
-  }
-  if (argc > 1 && strcmp(argv[1], "-o") == 0) {
-    if (argc < 3) {
+  while (first_argument < argc) {
+    if (strcmp(argv[first_argument], "-h") == 0 ||
+        strcmp(argv[first_argument], "--help") == 0) {
       usage(argv[0]);
-      return 1;
+      return 0;
     }
-    output = argv[2];
-    first_argument = 3;
-  } else if (argc > 1 && strncmp(argv[1], "-o", 2) == 0) {
-    output = argv[1] + 2;
-    first_argument = 2;
+    if (strcmp(argv[first_argument], "--8k") == 0) {
+      forced_bank_mode = 8;
+      first_argument++;
+      continue;
+    }
+    if (strcmp(argv[first_argument], "--16k") == 0) {
+      forced_bank_mode = 16;
+      first_argument++;
+      continue;
+    }
+    if (strcmp(argv[first_argument], "--compress-main-windows") == 0) {
+      compress_main_windows = 1;
+      first_argument++;
+      continue;
+    }
+    if (strcmp(argv[first_argument], "-o") == 0) {
+      if (first_argument + 1 >= argc) {
+        usage(argv[0]);
+        return 1;
+      }
+      output = argv[first_argument + 1];
+      first_argument += 2;
+      continue;
+    }
+    if (strncmp(argv[first_argument], "-o", 2) == 0 && argv[first_argument][2] != '\0') {
+      output = argv[first_argument] + 2;
+      first_argument++;
+      continue;
+    }
+    break;
   }
   if (first_argument < argc)
     directory = argv[first_argument];
@@ -1712,36 +2924,44 @@ int main(int argc, char **argv) {
 
   if (scan_games(directory, &games, &game_count))
     goto cleanup;
-  track_count = collect_tracks(games, game_count, tracks);
-  if (track_count == 0 || track_count > KSS_MAX_TRACKS) {
-    fprintf(stderr, "no tracks fit the KSS song range\n");
+  if (forced_bank_mode) {
+    char output_path[1024];
+    make_mode_output_path(output_path, sizeof(output_path), output,
+                          forced_bank_mode);
+    if (build_mode_output(games, game_count, forced_bank_mode, 0,
+                          output_path, compress_main_windows))
+      goto cleanup;
+    built = 1;
+  } else {
+    const uint8_t modes[] = {8, 16};
+    size_t mode_index;
+    for (mode_index = 0; mode_index < sizeof(modes); mode_index++) {
+      uint32_t i;
+      int have_mode = 0;
+      char output_path[1024];
+      for (i = 0; i < game_count; i++) {
+        if (games[i].bank_mode == modes[mode_index]) {
+          have_mode = 1;
+          break;
+        }
+      }
+      if (!have_mode)
+        continue;
+      make_mode_output_path(output_path, sizeof(output_path), output,
+                            modes[mode_index]);
+      if (build_mode_output(games, game_count, modes[mode_index], 1,
+                            output_path, compress_main_windows))
+        goto cleanup;
+      built = 1;
+    }
+  }
+  if (!built) {
+    fprintf(stderr, "no source KSS files found for the requested output mode\n");
     goto cleanup;
   }
-  fprintf(stderr, "selected %u tracks from %u games\n", (unsigned)track_count,
-          (unsigned)game_count);
-  if (prepare_sources(games, game_count, &pack))
-    goto cleanup;
-  fprintf(stderr, "reserved %u raw 16K source banks\n", (unsigned)pack.raw_count);
-  for (i = 0; i < track_count; i++)
-    fprintf(stderr, "adding track %u: %s\n", (unsigned)i, tracks[i].title);
-  fprintf(stderr, "compressing %u game images with ZX0...\n", (unsigned)game_count);
-  kss = build_output(games, game_count, tracks, track_count, &pack);
-  if (!kss) {
-    fprintf(stderr, "failed to build merged VGM Up KSS\n");
-    goto cleanup;
-  }
-  if (write_file(output, kss->data, kss->size))
-    goto cleanup;
-  printf("wrote %s (%u tracks, %u banks, %u bytes)\n", output,
-         (unsigned)track_count, (unsigned)pack.count, (unsigned)kss->size);
   result = 0;
 
 cleanup:
-  if (kss) {
-    free(kss->data);
-    free(kss);
-  }
-  free(pack.data);
   free_games(games, game_count);
   return result;
 }

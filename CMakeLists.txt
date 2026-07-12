@@ -65,6 +65,9 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
   target_compile_options(vigamup2kss PRIVATE -O2)
 endif()
 
+add_executable(vigamup2rom src/vigamup2rom.c)
+target_include_directories(vigamup2rom PRIVATE src)
+
 add_executable(kssplayer src/kssplayer.c)
 target_include_directories(kssplayer PRIVATE 3rd_party/libkss/src
                                              3rd_party/libkss/modules)
