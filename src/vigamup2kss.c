@@ -2859,7 +2859,7 @@ static int scan_games(const char *directory, GAME **games_out, uint32_t *count_o
 
 static void usage(const char *program) {
   fprintf(stderr, "Usage: %s [--8k|--16k] [--compress-main-windows] [-o output-prefix] [vigamup-directory]\n", program);
-  fprintf(stderr, "Default directory: vigamup\n");
+  fprintf(stderr, "A vigamup directory argument is required.\n");
   fprintf(stderr, "Default output: vigamup-8k.kss and vigamup-16k.kss.\n");
   fprintf(stderr, "Default mode: auto-detect each source KSS bank mode.\n");
   fprintf(stderr, "--8k or --16k forces one output mapper mode and allows cross-conversion.\n");
@@ -2869,7 +2869,7 @@ static void usage(const char *program) {
 
 int main(int argc, char **argv) {
   const char *output = "vigamup";
-  const char *directory = "vigamup";
+  const char *directory;
   GAME *games = NULL;
   uint32_t game_count = 0;
   int first_argument = 1;
@@ -2915,8 +2915,11 @@ int main(int argc, char **argv) {
     }
     break;
   }
-  if (first_argument < argc)
-    directory = argv[first_argument];
+  if (first_argument >= argc) {
+    usage(argv[0]);
+    return 0;
+  }
+  directory = argv[first_argument];
   if (first_argument + 1 < argc) {
     usage(argv[0]);
     return 1;
