@@ -1,0 +1,3 @@
+[submodule "3rd_party/libkss"]
+	path = 3rd_party/libkss
+	url = https://github.com/digital-sound-antiques/libkss.git
