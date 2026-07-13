@@ -1,0 +1,492 @@
+diff --git a/src/kssplay.c b/src/kssplay.c
+index bce81b5..a9b0cb7 100644
+--- a/src/kssplay.c
++++ b/src/kssplay.c
+@@ -1,7 +1,10 @@
+ /*
+  * 2004-05-23 : Patched for GG Stereo by RuRuRu
+  */
+-#include "kssplay.h"
++#include "kssplay.h"
++#ifdef KSS_HAVE_MOONSOUND
++#include "moonsound_opl4.h"
++#endif
+ #include <assert.h>
+ #include <math.h>
+ #include <stdio.h>
+@@ -11,10 +14,58 @@
+ #define PAL_FREQ 50.0
+ #define NTSC_FREQ (3579545.0 / 59718.0) /* 59.94 */
+ 
+-static int32_t volume_table[1 << KSSPLAY_VOL_BITS];
++static int32_t volume_table[1 << KSSPLAY_VOL_BITS];
+ 
+ static int mgs_pos = 0;
+-static char mgs_text[256];
++static char mgs_text[256];
++
++/* DMV1 MBWave uses the MWM base-frequency byte to drive its timer. A normal
++ * KSS play callback is scheduled at the video refresh rate, which is not
++ * correct for all of these songs. */
++static int is_mbwave_kss(KSSPLAY *kssplay) {
++  const uint8_t *song;
++  uint32_t offset;
++
++  if (!kssplay || !kssplay->kss || !kssplay->main_data ||
++      kssplay->kss->load_adr != 0x4000 || kssplay->kss->init_adr != 0x7f30 ||
++      kssplay->kss->play_adr != 0x45e5)
++    return 0;
++  offset = 0x8000u - kssplay->kss->load_adr;
++  if (offset + 6u > kssplay->kss->load_len)
++    return 0;
++  song = kssplay->main_data + offset;
++  return memcmp(song, "MBMS\x10\x08", 6) == 0;
++}
++
++static double mbwave_frequency_from_base(uint8_t base_frequency) {
++  if (base_frequency == 0)
++    return 60.0;
++  if (base_frequency == 1)
++    return 50.0;
++  return 1.0 / ((double)base_frequency * 0.0000808) + 0.5;
++}
++
++static uint8_t mbwave_header_base_frequency(KSSPLAY *kssplay) {
++  const uint8_t *song;
++  uint32_t offset;
++
++  if (!is_mbwave_kss(kssplay))
++    return 0xff;
++  offset = 0x8000u - kssplay->kss->load_adr;
++  if (offset + 6u + 0x1cu > kssplay->kss->load_len)
++    return 0xff;
++  song = kssplay->main_data + offset;
++  return song[6u + 0x1bu];
++}
++
++static double mbwave_vsync_frequency(KSSPLAY *kssplay) {
++  uint8_t base_frequency;
++
++  base_frequency = mbwave_header_base_frequency(kssplay);
++  if (base_frequency == 0xff)
++    return 0.0;
++  return mbwave_frequency_from_base(base_frequency);
++}
+ static int mgs_text_update(VM *vm, uint32_t a, uint32_t d) {
+   char buf[128] = "";
+   int adr, i, j;
+@@ -111,9 +162,14 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+   case MBMDATA:
+     kssplay->vm->scc_disable = 1;
+     break;
+-  case KSSDATA:
+-    kssplay->vm->scc_disable = (kss->bank_mode == BANK_16K) ? kss->ram_mode : 0;
+-    break;
++  case KSSDATA:
++    kssplay->vm->scc_disable = (kss->bank_mode == BANK_16K) ? kss->ram_mode : 0;
++    /* The merged Vigamup KSSX uses writable 8000H-BFFFH RAM while retaining
++     * the SCC device.  Stock KSS semantics use RAM mode to disable SCC, but
++     * this KSSX extension needs both capabilities. */
++    if (kss->kssx && kss->ram_mode)
++      kssplay->vm->scc_disable = 0;
++    break;
+   default:
+     kssplay->vm->scc_disable = 0;
+     break;
+@@ -124,7 +180,7 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+   return 0;
+ }
+ 
+-static uint32_t getclk(KSSPLAY *kssplay) {
++static uint32_t getclk(KSSPLAY *kssplay) {
+   if (kssplay->cpu_speed == 0) {
+     if (kssplay->kss->fmpac || kssplay->kss->msx_audio) {
+       return MSX_CLK * 2; /* 7.16MHz */
+@@ -135,10 +191,36 @@ static uint32_t getclk(KSSPLAY *kssplay) {
+   if (kssplay->cpu_speed <= 8) {
+     return MSX_CLK * kssplay->cpu_speed;
+   }
+-  return MSX_CLK;
+-}
+-
+-void KSSPLAY_get_MGStext(KSSPLAY *kssplay, char *buf, int max) {
++  return MSX_CLK;
++}
++
++static void mbwave_sync_frequency(KSSPLAY *kssplay) {
++  uint8_t base_frequency;
++  double frequency;
++
++  if (!kssplay->mbwave_timing)
++    return;
++
++  base_frequency = (uint8_t)MMAP_read_memory(kssplay->vm->mmap, 0x4e69);
++  /* MBPLAY fills the work area during its first PLAY call. Until then, a
++   * zero byte is just the cleared work area; keep the header timing. */
++  if (!kssplay->mbwave_runtime_ready && base_frequency == 0 &&
++      kssplay->mbwave_base_frequency != 0)
++    return;
++  kssplay->mbwave_runtime_ready = 1;
++  if (base_frequency == kssplay->mbwave_base_frequency)
++    return;
++
++  kssplay->mbwave_base_frequency = base_frequency;
++  frequency = mbwave_frequency_from_base(base_frequency);
++  if (fabs(frequency - kssplay->vsync_freq) < 0.000001)
++    return;
++
++  kssplay->vsync_freq = frequency;
++  VM_set_clock(kssplay->vm, getclk(kssplay), frequency);
++}
++
++void KSSPLAY_get_MGStext(KSSPLAY *kssplay, char *buf, int max) {
+   strncpy(buf, mgs_text, max);
+   buf[max - 1] = '\0';
+ }
+@@ -169,18 +251,30 @@ void KSSPLAY_set_device_type(KSSPLAY *kssplay, KSS_DEVICE device, uint32_t type)
+   kssplay->device_type[device] = type;
+ }
+ 
+-void KSSPLAY_reset(KSSPLAY *kssplay, uint32_t song, uint32_t cpu_speed) {
++void KSSPLAY_reset(KSSPLAY *kssplay, uint32_t song, uint32_t cpu_speed) {
+   int i;
+ 
+   if (!kssplay->kss) {
+     return;
+   }
+ 
+-  kssplay->cpu_speed = cpu_speed;
+-
+-  if (kssplay->vsync_freq == 0) {
+-    kssplay->vsync_freq = kssplay->kss->pal_mode ? PAL_FREQ : NTSC_FREQ;
+-  }
++  kssplay->cpu_speed = cpu_speed;
++
++  kssplay->mbwave_timing = (uint8_t)is_mbwave_kss(kssplay);
++  kssplay->mbwave_base_frequency = mbwave_header_base_frequency(kssplay);
++  kssplay->mbwave_runtime_ready = 0;
++  kssplay->vsync_freq = 0.0;
++
++#ifdef KSS_HAVE_MOONSOUND
++  if (kssplay->moonsound)
++    kss_moonsound_reset((KSS_MOONSOUND *)kssplay->moonsound);
++#endif
++
++  if (kssplay->vsync_freq == 0) {
++    kssplay->vsync_freq = mbwave_vsync_frequency(kssplay);
++    if (kssplay->vsync_freq == 0.0)
++      kssplay->vsync_freq = kssplay->kss->pal_mode ? PAL_FREQ : NTSC_FREQ;
++  }
+ 
+   VM_init_memory(kssplay->vm, kssplay->kss->ram_mode, kssplay->kss->load_adr, kssplay->kss->load_len,
+                  kssplay->main_data);
+@@ -192,10 +286,21 @@ void KSSPLAY_reset(KSSPLAY *kssplay, uint32_t song, uint32_t cpu_speed) {
+   }
+ 
+   VM_reset_device(kssplay->vm);
+-  VM_reset(kssplay->vm, getclk(kssplay), kssplay->kss->init_adr, kssplay->kss->play_adr, kssplay->vsync_freq, song,
+-           kssplay->kss->DA8_enable);
+-
+-  kssplay->fade = 0;
++  VM_reset(kssplay->vm, getclk(kssplay), kssplay->kss->init_adr, kssplay->kss->play_adr, kssplay->vsync_freq, song,
++           kssplay->kss->DA8_enable);
++
++#ifdef KSS_HAVE_MOONSOUND
++  if (kssplay->moonsound)
++    VM_set_moonsound(kssplay->vm, kssplay->moonsound,
++                     (void (*)(void *, uint32_t, uint32_t))kss_moonsound_write,
++                     (uint32_t (*)(void *, uint32_t))kss_moonsound_read);
++#endif
++
++  /* MBPLAY initializes 4E69 from the selected MWM. This also makes a
++   * runtime frequency command take effect immediately after INIT. */
++  mbwave_sync_frequency(kssplay);
++
++  kssplay->fade = 0;
+   kssplay->fade_flag = 0;
+ 
+   kssplay->step_inc = (double)kssplay->vm->clock / kssplay->rate;
+@@ -459,11 +564,12 @@ static inline void process_vm(KSSPLAY *kssplay) {
+   if (step_int > 0) {
+     kssplay->step_cnt -= step_int;
+     //VM_exec might execute more than step_int cycles
+-    uint32_t extra_cycles = VM_exec(kssplay->vm, step_int) - step_int;
+-    //correct the step_cnt for the extra cycles
+-    kssplay->step_cnt -= extra_cycles;
+-  }
+-}
++    uint32_t extra_cycles = VM_exec(kssplay->vm, step_int) - step_int;
++    //correct the step_cnt for the extra cycles
++    kssplay->step_cnt -= extra_cycles;
++    mbwave_sync_frequency(kssplay);
++  }
++}
+ 
+ static inline void calc_per_ch(KSSPLAY *kssplay, KSSPLAY_PER_CH_OUT *out) {
+ 
+@@ -521,11 +627,19 @@ static inline void calc_mono(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
+   for (i = 0; i < length; i++) {
+     process_vm(kssplay);
+ 
+-    if (kssplay->kss->msx_audio && !kssplay->device_mute[KSS_DEVICE_OPL]) {
+-      d = apply_volume(FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPL], OPL_calc(kssplay->vm->opl)), volume[KSS_DEVICE_OPL]);
+-    } else {
+-      d = 0;
+-    }
++    if (kssplay->kss->msx_audio && !kssplay->device_mute[KSS_DEVICE_OPL]) {
++      d = apply_volume(FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPL], OPL_calc(kssplay->vm->opl)), volume[KSS_DEVICE_OPL]);
++    } else {
++      d = 0;
++    }
++
++#ifdef KSS_HAVE_MOONSOUND
++    if (kssplay->moonsound && !kssplay->device_mute[KSS_DEVICE_OPL]) {
++      int32_t left, right;
++      kss_moonsound_calc((KSS_MOONSOUND *)kssplay->moonsound, &left, &right);
++      d += apply_volume(left, volume[KSS_DEVICE_OPL]);
++    }
++#endif
+ 
+     if (kssplay->kss->fmpac && !kssplay->device_mute[KSS_DEVICE_OPLL]) {
+       d += apply_volume(FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPLL], OPLL_calc(kssplay->vm->opll)), volume[KSS_DEVICE_OPLL]);
+@@ -574,12 +688,21 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
+   for (i = 0; i < length; i++) {
+     process_vm(kssplay);
+ 
+-    if (kssplay->kss->msx_audio && !kssplay->device_mute[KSS_DEVICE_OPL]) {
+-      c = FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPL], OPL_calc(kssplay->vm->opl));
+-      ch[0] = apply_volume(c, volume[KSS_DEVICE_OPL][0]);
+-      ch[1] = apply_volume(c, volume[KSS_DEVICE_OPL][1]);
+-    } else
+-      ch[0] = ch[1] = 0;
++    if (kssplay->kss->msx_audio && !kssplay->device_mute[KSS_DEVICE_OPL]) {
++      c = FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPL], OPL_calc(kssplay->vm->opl));
++      ch[0] = apply_volume(c, volume[KSS_DEVICE_OPL][0]);
++      ch[1] = apply_volume(c, volume[KSS_DEVICE_OPL][1]);
++    } else
++      ch[0] = ch[1] = 0;
++
++#ifdef KSS_HAVE_MOONSOUND
++    if (kssplay->moonsound && !kssplay->device_mute[KSS_DEVICE_OPL]) {
++      int32_t left, right;
++      kss_moonsound_calc((KSS_MOONSOUND *)kssplay->moonsound, &left, &right);
++      ch[0] += apply_volume(left, volume[KSS_DEVICE_OPL][0]);
++      ch[1] += apply_volume(right, volume[KSS_DEVICE_OPL][1]);
++    }
++#endif
+ 
+     if (kssplay->kss->fmpac && !kssplay->device_mute[KSS_DEVICE_OPLL]) {
+       if (kssplay->opll_stereo) {
+@@ -667,7 +790,7 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
+   }
+ }
+ 
+-void KSSPLAY_calc(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
++void KSSPLAY_calc(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
+   if (kssplay->nch == 1) {
+     calc_mono(kssplay, buf, length);
+   } else {
+@@ -676,7 +799,20 @@ void KSSPLAY_calc(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
+ 
+   kssplay->decoded_length += length;
+   LPDETECT_update(kssplay->vm->lpde, kssplay->decoded_length * 1000 / kssplay->rate, 30 * 1000, 1000);
+-}
++}
++
++void KSSPLAY_set_moonsound(KSSPLAY *kssplay, void *device) {
++  if (!kssplay)
++    return;
++  kssplay->moonsound = device;
++#ifdef KSS_HAVE_MOONSOUND
++  VM_set_moonsound(kssplay->vm, device,
++                   (void (*)(void *, uint32_t, uint32_t))kss_moonsound_write,
++                   (uint32_t (*)(void *, uint32_t))kss_moonsound_read);
++#else
++  (void)device;
++#endif
++}
+ 
+ void KSSPLAY_calc_silent(KSSPLAY *kssplay, uint32_t length) {
+   uint32_t i;
+diff --git a/src/kssplay.h b/src/kssplay.h
+index a6feec1..864d04f 100644
+--- a/src/kssplay.h
++++ b/src/kssplay.h
+@@ -29,7 +29,8 @@ struct tagKSSPLAY {
+   uint8_t *main_data;
+   uint8_t *bank_data;
+ 
+-  VM *vm;
++  VM *vm;
++  void *moonsound;
+ 
+   uint32_t rate;
+   uint32_t nch;
+@@ -56,7 +57,12 @@ struct tagKSSPLAY {
+   int32_t decoded_length;
+ 
+   uint32_t cpu_speed; /* 0: AutoDetect, 1...N: x1 ... xN */
+-  double vsync_freq;
++  double vsync_freq;
++
++  /* DMV1 MBWave timing state. */
++  uint8_t mbwave_timing;
++  uint8_t mbwave_base_frequency;
++  uint8_t mbwave_runtime_ready;
+ 
+   int scc_disable;
+   int opll_stereo;
+@@ -163,8 +169,12 @@ void KSSPLAY_set_silent_limit(KSSPLAY *kssplay, uint32_t time_in_ms);
+ 
+ void KSSPLAY_set_iowrite_handler(KSSPLAY *kssplay, void *context,
+                                  void (*handler)(void *context, uint32_t a, uint32_t d));
+-void KSSPLAY_set_memwrite_handler(KSSPLAY *kssplay, void *context,
+-                                  void (*handler)(void *context, uint32_t a, uint32_t d));
++void KSSPLAY_set_memwrite_handler(KSSPLAY *kssplay, void *context,
++                                  void (*handler)(void *context, uint32_t a, uint32_t d));
++
++/* Attach an optional raw MoonSound/YMF278B device. It receives the MSX
++ * MoonSound ports and is mixed into the normal KSS output. */
++void KSSPLAY_set_moonsound(KSSPLAY *kssplay, void *device);
+ 
+ uint32_t KSSPLAY_get_device_volume(KSSPLAY *kssplay, KSS_DEVICE device);
+ void KSSPLAY_get_MGStext(KSSPLAY *kssplay, char *buf, int max);
+diff --git a/src/vm/vm.c b/src/vm/vm.c
+index 9d2f47f..02baaea 100644
+--- a/src/vm/vm.c
++++ b/src/vm/vm.c
+@@ -13,12 +13,14 @@
+ #include "vm.h"
+ 
+ /* Callback functions from KMZ80 */
+-static uint32_t memread(VM *vm, uint32_t a) { return MMAP_read_memory(vm->mmap, a); }
+-
+-static void memwrite(VM *vm, uint32_t a, uint32_t d) {
+-  uint32_t page = a >> 13;
+-
+-  if (vm->memwrite_handler) {
++static uint32_t memread(VM *vm, uint32_t a) {
++  return MMAP_read_memory(vm->mmap, a);
++}
++static void memwrite(VM *vm, uint32_t a, uint32_t d) {
++  uint32_t page = a >> 13;
++
++
++  if (vm->memwrite_handler) {
+     vm->memwrite_handler(vm->memwrite_handler_context, a, d);
+   }
+ 
+@@ -48,8 +50,12 @@ static void memwrite(VM *vm, uint32_t a, uint32_t d) {
+ 
+ }
+ 
+-static uint32_t ioread(VM *vm, uint32_t a) {
+-  a &= 0xff;
++static uint32_t ioread(VM *vm, uint32_t a) {
++  a &= 0xff;
++
++  if (vm->moonsound_read &&
++      (a == 0x7e || a == 0x7f || (a >= 0xc4 && a <= 0xc7)))
++    return vm->moonsound_read(vm->moonsound_context, a);
+ 
+   if ((vm->psg) && ((a & 0xff) == 0xA2))
+     return PSG_readIO(vm->psg);
+@@ -64,9 +70,12 @@ static uint32_t ioread(VM *vm, uint32_t a) {
+ static void iowrite(VM *vm, uint32_t a, uint32_t d) {
+   a &= 0xff;
+ 
+-  if (vm->iowrite_handler) {
+-    vm->iowrite_handler(vm->iowrite_handler_context, a, d);
+-  }
++  if (vm->iowrite_handler) {
++    vm->iowrite_handler(vm->iowrite_handler_context, a, d);
++  }
++  if (vm->moonsound_write &&
++      (a == 0x7e || a == 0x7f || (a >= 0xc4 && a <= 0xc7)))
++    vm->moonsound_write(vm->moonsound_context, a, d);
+ 
+   if (((a == STOPIO) || (a == LOOPIO) || (a == ADRLIO) || (a == ADRHIO)) && (vm->IO[EXTIO] != 0x7f)) {
+     return;
+@@ -210,11 +219,19 @@ void VM_delete(VM *vm) {
+   free(vm);
+ }
+ 
+-uint32_t VM_exec(VM *vm, uint32_t cycles) { return kmz80_exec(&vm->context, cycles); }
++uint32_t VM_exec(VM *vm, uint32_t cycles) { return kmz80_exec(&vm->context, cycles); }
+ 
+ void VM_exec_func(VM *vm, uint32_t func_adr) { exec_setup(vm, func_adr); }
+ 
+-void VM_set_wioproc(VM *vm, uint32_t a, VM_WIOPROC p) { vm->WIOPROC[a] = p; }
++void VM_set_wioproc(VM *vm, uint32_t a, VM_WIOPROC p) { vm->WIOPROC[a] = p; }
++
++void VM_set_moonsound(VM *vm, void *context,
++                      void (*write)(void *context, uint32_t a, uint32_t d),
++                      uint32_t (*read)(void *context, uint32_t a)) {
++  vm->moonsound_context = context;
++  vm->moonsound_write = write;
++  vm->moonsound_read = read;
++}
+ 
+ void VM_set_clock(VM *vm, uint32_t clock, double vsync_freq) {
+   vm->clock = clock;
+@@ -336,11 +353,15 @@ void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t size, u
+     return;
+   }
+ 
+-  memset(main_memory, 0xC9, 0x10000);
+-  memcpy(main_memory + 0x93, "\xC3\x01\x00\xC3\x09\x00", 6);
+-  memcpy(main_memory + 0x01, "\xD3\xA0\xF5\x7B\xD3\xA1\xF1\xC9", 8);
+-  memcpy(main_memory + 0x09, "\xD3\xA0\xDB\xA2\xC9", 5);
+-  memset(main_memory + 0x4000, 0, 0xC000);
++  memset(main_memory, 0xC9, 0x10000);
++  memcpy(main_memory + 0x93, "\xC3\x01\x00\xC3\x09\x00", 6);
++  memcpy(main_memory + 0x01, "\xD3\xA0\xF5\x7B\xD3\xA1\xF1\xC9", 8);
++  memcpy(main_memory + 0x09, "\xD3\xA0\xDB\xA2\xC9", 5);
++  /* RSLREG (0138H) must return a defined primary-slot register value. */
++  memcpy(main_memory + 0x138, "\xAF\xC9", 2);
++  memset(main_memory + 0x4000, 0, 0xC000);
++  /* MBWave copies this five-byte return stub through its MSX work area. */
++  memset(main_memory + 0xFD9A, 0xC9, 5);
+   if ((offset + size) > 0x10000)
+     size = 0x10000 - offset;
+   memcpy(main_memory + offset, data, size);
+@@ -386,4 +407,4 @@ void VM_write_memory(VM *vm, uint32_t a, uint32_t d) {
+ 
+ void VM_write_io(VM *vm, uint32_t a, uint32_t d) {
+   iowrite(vm, a, d);
+-}
+\ No newline at end of file
++}
+diff --git a/src/vm/vm.h b/src/vm/vm.h
+index 6ddf0e3..2c25647 100644
+--- a/src/vm/vm.h
++++ b/src/vm/vm.h
+@@ -62,9 +62,12 @@ struct tagVM {
+ 
+   void *fp;
+ 
+-  void *iowrite_handler_context;
+-  void (*iowrite_handler)(void *context, uint32_t a, uint32_t d);
+-  void *memwrite_handler_context;
++  void *iowrite_handler_context;
++  void (*iowrite_handler)(void *context, uint32_t a, uint32_t d);
++  void *moonsound_context;
++  void (*moonsound_write)(void *context, uint32_t a, uint32_t d);
++  uint32_t (*moonsound_read)(void *context, uint32_t a);
++  void *memwrite_handler_context;
+   void (*memwrite_handler)(void *context, uint32_t a, uint32_t d);
+ };
+ 
+@@ -87,7 +90,10 @@ void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t
+ uint32_t VM_exec(VM *vm, uint32_t cycles);
+ void VM_exec_func(VM *vm, uint32_t init_adr);
+ void VM_set_clock(VM *vm, uint32_t clock, double vsync_freq);
+-void VM_set_wioproc(VM *vm, uint32_t a, VM_WIOPROC p);
++void VM_set_wioproc(VM *vm, uint32_t a, VM_WIOPROC p);
++void VM_set_moonsound(VM *vm, void *context,
++                      void (*write)(void *context, uint32_t a, uint32_t d),
++                      uint32_t (*read)(void *context, uint32_t a));
+ 
+ void VM_set_PSG_type(VM *vm, uint32_t psg_type);
+ void VM_set_SCC_type(VM *vm, uint32_t scc_type);
+

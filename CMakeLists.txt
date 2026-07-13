@@ -43,6 +43,25 @@ endif()
 
 # Keep the reference KSS emulator with this project so the command-line test
 # player does not depend on a separately installed libkss.
+set(KSS_PATCH_FILE
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/libkss-moonsound.patch")
+execute_process(
+  COMMAND "${CMAKE_COMMAND}"
+          "-DLIBKSS_DIR=${CMAKE_CURRENT_SOURCE_DIR}/3rd_party/libkss"
+          "-DKSS_PATCH_FILE=${KSS_PATCH_FILE}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_libkss_patch.cmake"
+  RESULT_VARIABLE KSS_PATCH_RESULT
+  OUTPUT_VARIABLE KSS_PATCH_OUTPUT
+  ERROR_VARIABLE KSS_PATCH_ERROR
+)
+if(NOT KSS_PATCH_RESULT EQUAL 0)
+  message(FATAL_ERROR
+    "Could not prepare the bundled libkss checkout.\n"
+    "${KSS_PATCH_OUTPUT}${KSS_PATCH_ERROR}")
+endif()
+if(KSS_PATCH_OUTPUT)
+  message(STATUS "${KSS_PATCH_OUTPUT}")
+endif()
 add_subdirectory(3rd_party/libkss EXCLUDE_FROM_ALL)
 
 if(KSP_MOONSOUND_DIR)
