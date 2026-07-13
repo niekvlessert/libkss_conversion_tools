@@ -12,6 +12,8 @@ void kss_moonsound_delete(KSS_MOONSOUND *device);
 void kss_moonsound_reset(KSS_MOONSOUND *device);
 int kss_moonsound_load_mwk(KSS_MOONSOUND *device, const char *path,
                            char *error, size_t error_size);
+int kss_moonsound_load_mwk_data(KSS_MOONSOUND *device, const uint8_t *data,
+                                size_t size, char *error, size_t error_size);
 void kss_moonsound_write(KSS_MOONSOUND *device, uint32_t port, uint32_t data);
 uint32_t kss_moonsound_read(KSS_MOONSOUND *device, uint32_t port);
 void kss_moonsound_calc(KSS_MOONSOUND *device, int32_t *left, int32_t *right);

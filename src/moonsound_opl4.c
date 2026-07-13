@@ -209,6 +209,132 @@ int kss_moonsound_load_mwk(KSS_MOONSOUND *device, const char *path,
   return 1;
 }
 
+/* The KSP container keeps the MWK as a memory chunk. libmoonsound's public
+ * loader accepts a path, so keep the small MWK decoder here for the player
+ * path and upload the resulting OPL4 RAM image directly. */
+static int decode_mwk_data(const uint8_t *data, size_t size, MwkKit *kit,
+                           uint8_t *opl4_ram) {
+  size_t cursor = 0;
+  uint8_t signature[6];
+  uint8_t size_bytes[3];
+  uint8_t edit_mode = 0;
+  uint32_t sample_address = 0x200300;
+  uint32_t header_address = 0;
+  int i;
+
+  if (!data || !kit || !opl4_ram || size < sizeof(signature))
+    return 0;
+  memcpy(signature, data, sizeof(signature));
+  cursor += sizeof(signature);
+  if (memcmp(signature, "MBMS\x10\x0D", sizeof(signature)) == 0) {
+    edit_mode = 0;
+  } else if (memcmp(signature, "MBMS\x10\x0C", sizeof(signature)) == 0) {
+    edit_mode = 1;
+  } else {
+    return 0;
+  }
+
+  if (cursor + sizeof(size_bytes) + 1u + MAX_OWN_TONES > size)
+    return 0;
+  memcpy(size_bytes, data + cursor, sizeof(size_bytes));
+  cursor += sizeof(size_bytes);
+  kit->total_sample_size = (uint32_t)size_bytes[0] |
+                           ((uint32_t)size_bytes[1] << 8) |
+                           ((uint32_t)size_bytes[2] << 16);
+  kit->nr_of_waves = data[cursor++];
+  memcpy(kit->own_tone_info, data + cursor, MAX_OWN_TONES);
+  cursor += MAX_OWN_TONES;
+  if (kit->nr_of_waves > MAX_OWN_PATCHES ||
+      cursor + sizeof(OWN_PATCH) * kit->nr_of_waves > size)
+    return 0;
+  memcpy(kit->own_patches, data + cursor,
+         sizeof(OWN_PATCH) * kit->nr_of_waves);
+  cursor += sizeof(OWN_PATCH) * kit->nr_of_waves;
+  if (edit_mode) {
+    size_t edit_bytes = (size_t)kit->nr_of_waves * 16u;
+    if (cursor + edit_bytes > size)
+      return 0;
+    cursor += edit_bytes;
+  }
+
+  for (i = 0; i < MAX_OWN_TONES; i++) {
+    if (kit->own_tone_info[i] & 0x01) {
+      uint8_t sample_header[13];
+      uint16_t sample_len;
+      uint32_t ram_offset;
+      uint32_t wave_address = sample_address;
+
+      if (edit_mode) {
+        if (cursor + 16u > size)
+          return 0;
+        cursor += 16u;
+      }
+      if (cursor + sizeof(sample_header) > size)
+        return 0;
+      memcpy(sample_header, data + cursor, sizeof(sample_header));
+      cursor += sizeof(sample_header);
+      if (kit->own_tone_info[i] & 0x20) {
+        opl4_ram[header_address] =
+            sample_header[12] | (kit->own_tone_info[i] & 0xC0);
+      } else {
+        if (wave_address < 0x200000)
+          return 0;
+        ram_offset = wave_address - 0x200000;
+        sample_len = (uint16_t)sample_header[11] |
+                     ((uint16_t)sample_header[12] << 8);
+        if (ram_offset > 2u * 1024u * 1024u ||
+            sample_len > 2u * 1024u * 1024u - ram_offset ||
+            cursor + sample_len > size)
+          return 0;
+        opl4_ram[header_address] =
+            (uint8_t)((wave_address >> 16) & 0x3f) |
+            (kit->own_tone_info[i] & 0xC0);
+        memcpy(opl4_ram + ram_offset, data + cursor, sample_len);
+        cursor += sample_len;
+        sample_address += sample_len;
+      }
+      opl4_ram[header_address + 1] = (uint8_t)(wave_address >> 8);
+      opl4_ram[header_address + 2] = (uint8_t)wave_address;
+      opl4_ram[header_address + 3] = sample_header[2];
+      opl4_ram[header_address + 4] = sample_header[3];
+      opl4_ram[header_address + 5] = sample_header[4];
+      opl4_ram[header_address + 6] = sample_header[5];
+      opl4_ram[header_address + 7] = sample_header[6];
+      opl4_ram[header_address + 8] = sample_header[7];
+      opl4_ram[header_address + 9] = sample_header[8];
+      opl4_ram[header_address + 10] = sample_header[9];
+      opl4_ram[header_address + 11] = sample_header[10];
+    }
+    header_address += 12;
+  }
+  return 1;
+}
+
+int kss_moonsound_load_mwk_data(KSS_MOONSOUND *device, const uint8_t *data,
+                                size_t size, char *error, size_t error_size) {
+  MwkKit kit;
+  uint8_t *ram;
+
+  if (!device || !data || !size || !device->alloc_ram || !device->write_ram) {
+    set_error(error, error_size, "MoonSound RAM upload is unavailable");
+    return 0;
+  }
+  ram = (uint8_t *)calloc(1, 2u * 1024u * 1024u);
+  if (!ram) {
+    set_error(error, error_size, "out of memory for MWK data");
+    return 0;
+  }
+  if (!decode_mwk_data(data, size, &kit, ram)) {
+    free(ram);
+    set_error(error, error_size, "invalid MWK data");
+    return 0;
+  }
+  device->alloc_ram(device->device.dataPtr, 2u * 1024u * 1024u);
+  device->write_ram(device->device.dataPtr, 0, 2u * 1024u * 1024u, ram);
+  free(ram);
+  return 1;
+}
+
 void kss_moonsound_write(KSS_MOONSOUND *device, uint32_t port,
                          uint32_t data) {
   int offset;

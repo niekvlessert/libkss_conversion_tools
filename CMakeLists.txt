@@ -10,7 +10,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Optional raw OPL4 backend. The source tree is intentionally supplied by the
 # caller because it is also used by the standalone libmoonsound project.
 set(KSP_MOONSOUND_DIR "" CACHE PATH
-    "libmoonsound source directory (enables YMF278B audio in kssplayer)")
+    "libmoonsound source directory (enables YMF278B audio in kspplayer)")
 
 add_library(ksp STATIC
   src/ksp/ksp.c
@@ -160,20 +160,30 @@ endif()
 add_executable(vigamup2rom src/vigamup2rom.c)
 target_include_directories(vigamup2rom PRIVATE src)
 
+add_executable(kspplayer src/kssplayer.c)
+# Keep the old executable name as a compatibility target. Both names use the
+# same KSP/KSS and MoonSound-capable implementation.
 add_executable(kssplayer src/kssplayer.c)
-target_include_directories(kssplayer PRIVATE 3rd_party/libkss/src
-                                             3rd_party/libkss/modules)
-target_compile_definitions(kssplayer PRIVATE SDL_MAIN_HANDLED)
-target_link_libraries(kssplayer PRIVATE kss ${KSSPLAYER_AUDIO_TARGET})
-if(KSP_MOONSOUND_DIR)
-  target_compile_definitions(kssplayer PRIVATE KSS_HAVE_MOONSOUND)
-  target_include_directories(kssplayer PRIVATE src)
-endif()
+foreach(KSSPLAYER_TARGET kspplayer kssplayer)
+  target_include_directories(${KSSPLAYER_TARGET} PRIVATE
+    3rd_party/libkss/src
+    3rd_party/libkss/modules)
+  target_compile_definitions(${KSSPLAYER_TARGET} PRIVATE SDL_MAIN_HANDLED)
+  target_link_libraries(${KSSPLAYER_TARGET} PRIVATE kss ksp
+    ${KSSPLAYER_AUDIO_TARGET})
+  if(KSP_MOONSOUND_DIR)
+    target_compile_definitions(${KSSPLAYER_TARGET} PRIVATE KSS_HAVE_MOONSOUND)
+    target_compile_definitions(${KSSPLAYER_TARGET} PRIVATE
+      KSP_DEFAULT_YRW801_ROM="${KSP_MOONSOUND_DIR}/yrw801.rom")
+    target_include_directories(${KSSPLAYER_TARGET} PRIVATE src)
+  endif()
+endforeach()
 
 if(UNIX)
   target_link_libraries(sng2kss PRIVATE m)
   target_link_libraries(pro2kss PRIVATE m)
   target_link_libraries(sngpro2kss PRIVATE m)
   target_link_libraries(vigamup2kss PRIVATE m)
+  target_link_libraries(kspplayer PRIVATE m)
   target_link_libraries(kssplayer PRIVATE m)
 endif()
