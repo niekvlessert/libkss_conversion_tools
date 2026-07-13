@@ -109,12 +109,14 @@ mbwave_extract WAVEDRVR.BIN mbwave-dmv1.engine
 The extractor validates the MSX header and the `AB\0` marker before writing
 the exact `3F27H`-byte image expected at `4000H`.
 
-For the first KSS/KSP bootstrap, `mbwave2ksp` performs that extraction and
-builds the archive in one step. It stores the MWM header, metadata, position
+For the compact KSS/KSP path, `mbwave2ksp` performs that extraction and stores
+the original raw MWM only in the KSP `SONG` chunk. A KSP-aware loader
+materializes the KSS image by copying the `ENGN` chunk to `4000H`, building the
+engine-ready song image at `8000H`, and installing the small bootstrap at
+`7F30H`. The materialized image stores the MWM header, metadata, position
 table, and pattern offsets at `8000H`, followed by pattern data with the
-loader-only block headers removed. The original raw MWM remains in the KSP
-`SONG` chunk. `DA04H` is set to `8006H` so the engine skips the `MBMS`
-signature:
+loader-only block headers removed. `DA04H` is set to `8006H` so the engine
+skips the `MBMS` signature:
 
 ```bash
 mbwave2ksp --driver WAVEDRVR.BIN --song REARVIEW.MWM \
@@ -131,12 +133,10 @@ mbwave2ksp --driver WAVEDRVR.BIN --song RESIST.MWM \
 The optional kit is stored as an `MWK ` chunk. Tracks whose wave numbers are
 all in the YRW801 ROM range do not need an MWK.
 
-The KSS-visible prefix contains the fixed driver at `4000H` and the compact
-MWM engine image at `8000H`; the KSP directory also contains the original
-`SONG`, `ENGN`, and `EDES` chunks.
-This first bootstrap intentionally keeps the KSS-visible copy so it can be
-tested independently. Compression and eliminating that transitional duplicate
-come after the runtime path is verified.
+The compact KSP stores the `SONG`, `ENGN`, and `EDES` chunks only once. The
+KSSX header remains at the beginning of the file as the runtime image
+descriptor, but the load image between the header and KSP directory is not
+stored.
 
 ## MoonSound ports
 

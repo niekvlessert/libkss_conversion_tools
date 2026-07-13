@@ -34,7 +34,7 @@ static void usage(const char *name) {
   fprintf(stderr,
       "usage: %s --kss-prefix FILE --engine FILE --song FILE\n"
       "          --engine-desc FILE --output FILE [metadata options]\n"
-      "          [--engine-msx-bin]\n"
+      "          [--engine-msx-bin] [--zx0]\n"
       "descriptor format: key=value (addresses accept 0x prefix)\n"
       "metadata: --title TEXT --author TEXT --game TEXT --comment TEXT\n",
       name);
@@ -45,6 +45,7 @@ int main(int argc, char **argv) {
   const char *descriptor_path = NULL, *output_path = NULL;
   const char *title = NULL, *author = NULL, *game = NULL, *comment = NULL;
   int engine_is_msx_bin = 0;
+  int use_zx0 = 0;
   BLOB prefix = {0}, engine = {0}, song = {0};
   KSP_ENGINE_DESCRIPTOR descriptor;
   uint8_t descriptor_data[KSP_ENGINE_DESCRIPTOR_SIZE];
@@ -67,6 +68,10 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--comment") && value) comment = value;
     else if (!strcmp(argv[i], "--engine-msx-bin")) {
       engine_is_msx_bin = 1;
+      i--;
+    }
+    else if (!strcmp(argv[i], "--zx0")) {
+      use_zx0 = 1;
       i--;
     }
     else {
@@ -119,9 +124,11 @@ int main(int argc, char **argv) {
   memcpy(chunks[0].type, "ENGN", 4);
   chunks[0].data = engine.data;
   chunks[0].size = engine.size;
+  chunks[0].compression = use_zx0 ? KSP_COMPRESSION_ZX0 : KSP_COMPRESSION_NONE;
   memcpy(chunks[1].type, "SONG", 4);
   chunks[1].data = song.data;
   chunks[1].size = song.size;
+  chunks[1].compression = use_zx0 ? KSP_COMPRESSION_ZX0 : KSP_COMPRESSION_NONE;
   memcpy(chunks[2].type, "EDES", 4);
   chunks[2].data = descriptor_data;
   chunks[2].size = sizeof(descriptor_data);

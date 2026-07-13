@@ -15,8 +15,17 @@ set(KSP_MOONSOUND_DIR "" CACHE PATH
 add_library(ksp STATIC
   src/ksp/ksp.c
   src/ksp/engine.c
+  src/ksp/mbwave.c
+  src/zx_compressor.c
+  src/zx_decompressor.c
+  src/zx0/optimize.c
+  src/zx0/compress.c
+  src/zx0/memory.c
 )
-target_include_directories(ksp PUBLIC include)
+target_include_directories(ksp PUBLIC include PRIVATE src)
+if(UNIX)
+  target_link_libraries(ksp PUBLIC m)
+endif()
 
 add_executable(kspack tools/kspack.c)
 target_link_libraries(kspack PRIVATE ksp)
@@ -24,6 +33,10 @@ target_include_directories(kspack PRIVATE include)
 
 add_executable(kspvalidate tools/kspvalidate.c)
 target_link_libraries(kspvalidate PRIVATE ksp)
+
+add_executable(kspmaterialize tools/kspmaterialize.c)
+target_link_libraries(kspmaterialize PRIVATE ksp)
+target_include_directories(kspmaterialize PRIVATE include)
 target_include_directories(kspvalidate PRIVATE include)
 
 add_executable(mbwave_extract tools/mbwave_extract.c)

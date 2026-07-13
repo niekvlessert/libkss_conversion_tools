@@ -60,6 +60,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="mbwave2ksp executable (default: build-moonsound/mbwave2ksp or build/mbwave2ksp)",
     )
+    parser.add_argument(
+        "--zx0",
+        action="store_true",
+        help="ZX0-compress ENGN and SONG chunks (disabled by default)",
+    )
     return parser.parse_args()
 
 
@@ -215,6 +220,7 @@ def create_ksp_files(
     ksp_dir: Path,
     mbwave2ksp: Path,
     track_metadata: dict[tuple[str, str], tuple[str | None, str]],
+    use_zx0: bool = False,
 ) -> int:
     songs = sorted(
         (path for path in mwm_dir.rglob("*") if path.is_file() and path.suffix.upper() == ".MWM"),
@@ -268,6 +274,8 @@ def create_ksp_files(
             "--output",
             str(output),
         ]
+        if use_zx0:
+            command.append("--zx0")
         if samplepack:
             command.extend(["--mwk", str(samplepack)])
         title = menu_title or header_title
@@ -301,7 +309,9 @@ def main() -> int:
         mbwave2ksp = find_mbwave2ksp(args.mbwave2ksp.resolve() if args.mbwave2ksp else None)
         mwm_dir.mkdir(parents=True, exist_ok=True)
         track_metadata = extract_assets(veterans_dir, mwm_dir)
-        return create_ksp_files(mwm_dir, ksp_dir, mbwave2ksp, track_metadata)
+        return create_ksp_files(
+            mwm_dir, ksp_dir, mbwave2ksp, track_metadata, args.zx0
+        )
     except (OSError, RuntimeError, zipfile.BadZipFile) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

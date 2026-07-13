@@ -5,14 +5,21 @@
 #include <stdint.h>
 
 #define KSP_TRAILER_SIZE 24u
+#define KSP_KSS_HEADER_SIZE 0x20u
 #define KSP_DIRECTORY_HEADER_SIZE 16u
 #define KSP_DIRECTORY_ENTRY_SIZE 32u
+#define KSP_COMPRESSION_NONE 0u
+#define KSP_COMPRESSION_ZX0 1u
 
 typedef struct {
   char type[4];
   uint32_t id;
   const uint8_t *data;
   uint32_t size;
+  /* Requested compression. The writer may leave a chunk uncompressed when
+   * compression would not make it smaller. ZX0 is supported for ENGN and
+   * SONG chunks only. */
+  uint16_t compression;
 } KSP_CHUNK;
 
 typedef struct {
@@ -35,8 +42,10 @@ typedef struct {
   KSP_ENTRY *entries;
 } KSP_INDEX;
 
-/* Write a KSP file containing an already-valid KSSX prefix and uncompressed
- * chunks. The caller retains ownership of all input buffers. */
+/* Write a compact KSP file. The first 0x20 bytes of the supplied KSSX image
+ * are retained as the KSSX header; its load image is reconstructed from the
+ * ENGN/SONG chunks when a player opens the KSP. The caller retains ownership
+ * of all input buffers. */
 int ksp_write_file(const char *output_path, const uint8_t *kss_prefix,
                    uint32_t kss_prefix_size, const KSP_CHUNK *chunks,
                    uint32_t chunk_count, char *error, size_t error_size);
@@ -47,6 +56,14 @@ int ksp_validate_file(const char *path, int verify_crc, KSP_INDEX *index,
 
 int ksp_read_chunk(const char *path, const KSP_ENTRY *entry, uint8_t **data,
                    char *error, size_t error_size);
+
+int ksp_index_is_compact(const KSP_INDEX *index);
+
+/* Materialize the KSS image described by a compact KSP. The returned buffer
+ * is owned by the caller and is suitable for KSS_bin2kss(). */
+int ksp_build_kss_image(const char *path, const KSP_INDEX *index,
+                        uint8_t **image, uint32_t *image_size,
+                        char *error, size_t error_size);
 
 void ksp_free_index(KSP_INDEX *index);
 uint32_t ksp_crc32(const uint8_t *data, size_t size);

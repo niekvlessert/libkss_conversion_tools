@@ -15,14 +15,16 @@ int main(int argc, char **argv) {
     fprintf(stderr, "invalid KSP: %s\n", error);
     return 1;
   }
-  printf("valid KSP1: %u bytes, %u chunks\n", index.file_size,
-         index.entry_count);
+  printf("valid KSP1: %u bytes, %u chunks (%s layout)\n", index.file_size,
+         index.entry_count,
+         ksp_index_is_compact(&index) ? "compact" : "legacy");
   printf("directory: offset=0x%X size=%u\n", index.directory_offset,
          index.directory_size);
   for (i = 0; i < index.entry_count; i++) {
     KSP_ENTRY *entry = &index.entries[i];
-    printf("  %s[%u]: offset=0x%X size=%u crc=%08X\n", entry->type,
-           entry->id, entry->offset, entry->unpacked_size, entry->crc32);
+    printf("  %s[%u]: offset=0x%X packed=%u unpacked=%u compression=%u crc=%08X\n",
+           entry->type, entry->id, entry->offset, entry->packed_size,
+           entry->unpacked_size, entry->compression, entry->crc32);
   }
   ksp_free_index(&index);
   return 0;

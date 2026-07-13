@@ -739,6 +739,8 @@ cleanup:
 int main(int argc, char **argv) {
   Options options;
   KSS *kss;
+  uint8_t *compact_kss_image = NULL;
+  uint32_t compact_kss_size = 0;
   KSPResources resources;
   int ksp_result;
   int result;
@@ -753,7 +755,22 @@ int main(int argc, char **argv) {
   if (ksp_result < 0)
     return 1;
 
-  kss = KSS_load_file((char *)options.input);
+  if (resources.is_ksp && ksp_index_is_compact(&resources.index)) {
+    char error[256];
+    if (!ksp_build_kss_image(options.input, &resources.index,
+                             &compact_kss_image, &compact_kss_size, error,
+                             sizeof(error))) {
+      fprintf(stderr, "error: cannot materialize compact KSP: %s\n", error);
+      release_ksp_resources(&resources);
+      return 1;
+    }
+    kss = KSS_bin2kss(compact_kss_image, compact_kss_size,
+                      options.input);
+    free(compact_kss_image);
+    compact_kss_image = NULL;
+  } else {
+    kss = KSS_load_file((char *)options.input);
+  }
   if (!kss) {
     fprintf(stderr, "error: cannot load KSP/KSS file: %s\n", options.input);
     release_ksp_resources(&resources);
