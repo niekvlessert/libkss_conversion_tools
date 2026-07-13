@@ -7,9 +7,82 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+# Optional raw OPL4 backend. The source tree is intentionally supplied by the
+# caller because it is also used by the standalone libmoonsound project.
+set(KSP_MOONSOUND_DIR "" CACHE PATH
+    "libmoonsound source directory (enables YMF278B audio in kssplayer)")
+
+add_library(ksp STATIC
+  src/ksp/ksp.c
+  src/ksp/engine.c
+)
+target_include_directories(ksp PUBLIC include)
+
+add_executable(kspack tools/kspack.c)
+target_link_libraries(kspack PRIVATE ksp)
+target_include_directories(kspack PRIVATE include)
+
+add_executable(kspvalidate tools/kspvalidate.c)
+target_link_libraries(kspvalidate PRIVATE ksp)
+target_include_directories(kspvalidate PRIVATE include)
+
+add_executable(mbwave_extract tools/mbwave_extract.c)
+
+add_executable(mbwave2ksp tools/mbwave2ksp.c)
+target_link_libraries(mbwave2ksp PRIVATE ksp)
+target_include_directories(mbwave2ksp PRIVATE include)
+
+add_executable(ksp_selftest tests/ksp_selftest.c)
+target_link_libraries(ksp_selftest PRIVATE ksp)
+target_include_directories(ksp_selftest PRIVATE include)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_test(NAME ksp_selftest COMMAND ksp_selftest)
+endif()
+
 # Keep the reference KSS emulator with this project so the command-line test
 # player does not depend on a separately installed libkss.
 add_subdirectory(3rd_party/libkss EXCLUDE_FROM_ALL)
+
+if(KSP_MOONSOUND_DIR)
+  set(KSP_LIBVGM_DIR "${KSP_MOONSOUND_DIR}/src_libvgm")
+  target_sources(kss PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/moonsound_opl4.c"
+    "${KSP_MOONSOUND_DIR}/src/mwm_parser.c"
+    "${KSP_LIBVGM_DIR}/emu/SoundEmu.c"
+    "${KSP_LIBVGM_DIR}/emu/Resampler.c"
+    "${KSP_LIBVGM_DIR}/emu/panning.c"
+    "${KSP_LIBVGM_DIR}/emu/dac_control.c"
+    "${KSP_LIBVGM_DIR}/emu/logging.c"
+    "${KSP_LIBVGM_DIR}/emu/cores/ymf278b.c"
+    "${KSP_LIBVGM_DIR}/emu/cores/262intf.c"
+    "${KSP_LIBVGM_DIR}/emu/cores/nukedopl3.c"
+  )
+  target_include_directories(kss PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${KSP_MOONSOUND_DIR}/src"
+    "${KSP_LIBVGM_DIR}"
+    "${KSP_LIBVGM_DIR}/emu"
+    "${KSP_LIBVGM_DIR}/emu/cores"
+  )
+  target_compile_definitions(kss PRIVATE
+    KSS_HAVE_MOONSOUND
+    VGM_LITTLE_ENDIAN
+    SNDDEV_SELECT
+    SNDDEV_YMF278B
+    SNDDEV_YMF262
+    EC_YMF262_NUKED
+  )
+
+  add_executable(kss2wav_moonsound src/kss2wav_moonsound.c)
+  target_include_directories(kss2wav_moonsound PRIVATE
+    3rd_party/libkss/src
+    3rd_party/libkss/modules
+    src
+  )
+  target_link_libraries(kss2wav_moonsound PRIVATE kss)
+endif()
 
 find_package(SDL2 CONFIG QUIET)
 if(TARGET SDL2::SDL2)
@@ -73,6 +146,10 @@ target_include_directories(kssplayer PRIVATE 3rd_party/libkss/src
                                              3rd_party/libkss/modules)
 target_compile_definitions(kssplayer PRIVATE SDL_MAIN_HANDLED)
 target_link_libraries(kssplayer PRIVATE kss ${KSSPLAYER_AUDIO_TARGET})
+if(KSP_MOONSOUND_DIR)
+  target_compile_definitions(kssplayer PRIVATE KSS_HAVE_MOONSOUND)
+  target_include_directories(kssplayer PRIVATE src)
+endif()
 
 if(UNIX)
   target_link_libraries(sng2kss PRIVATE m)

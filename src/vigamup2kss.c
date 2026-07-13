@@ -161,6 +161,7 @@ typedef struct {
   uint8_t *data;
   uint32_t count;
   uint32_t raw_count;
+  uint32_t stream_bytes;
   uint32_t stream_offset;
   uint32_t bank_size;
   uint8_t bank_mode;
@@ -498,11 +499,14 @@ static int bank_pack_reserve(BANK_PACK *pack, uint32_t count) {
 
 static uint32_t bank_pack_add_raw(BANK_PACK *pack, const uint8_t *data) {
   uint32_t bank;
-  if (pack->stream_offset != 0 || bank_pack_reserve(pack, pack->count + 1))
+  /* Raw and compressed banks may be interleaved when only one game is being
+   * compressed.  A raw bank always starts a new physical bank. */
+  if (bank_pack_reserve(pack, pack->count + 1))
     return 0;
   bank = KSS_BANK_OFFSET + pack->count - 1;
   memcpy(pack->data + (pack->count - 1) * pack->bank_size, data, pack->bank_size);
-  pack->raw_count = pack->count;
+  pack->raw_count++;
+  pack->stream_offset = 0;
   return bank;
 }
 
@@ -513,7 +517,8 @@ static uint32_t bank_pack_add_stream(BANK_PACK *pack, const uint8_t *data,
 
   if (!data || size == 0 || size > pack->bank_size)
     return 0;
-  if (pack->count == pack->raw_count || pack->stream_offset + size > pack->bank_size) {
+  if (pack->stream_offset == 0 ||
+      pack->stream_offset + size > pack->bank_size) {
     if (bank_pack_reserve(pack, pack->count + 1))
       return 0;
     pack->stream_offset = 0;
@@ -522,6 +527,7 @@ static uint32_t bank_pack_add_stream(BANK_PACK *pack, const uint8_t *data,
   offset = pack->stream_offset;
   memcpy(pack->data + (pack->count - 1) * pack->bank_size + offset, data, size);
   pack->stream_offset += size;
+  pack->stream_bytes += size;
   *source = (uint16_t)(0x8000 + offset);
   return bank;
 }
@@ -786,11 +792,20 @@ static int collect_16k_bank_patches(GAME *game) {
   return 0;
 }
 
+static int game_is_compression_target(const GAME *game,
+                                      const GAME *compression_target,
+                                      int compress_all) {
+  return compress_all || (compression_target && game == compression_target);
+}
+
 static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack,
-                           int compress_data) {
+                           int compress_all, const GAME *compression_target) {
   uint32_t i;
   for (i = 0; i < game_count; i++) {
-    if (prepare_source_banks(&games[i], pack, compress_data))
+    int compress_game = game_is_compression_target(&games[i],
+                                                    compression_target,
+                                                    compress_all);
+    if (prepare_source_banks(&games[i], pack, compress_game))
       return 1;
     if (games[i].bank_mode == 8) {
       if (collect_8k_mapper_patches(&games[i]))
@@ -798,7 +813,7 @@ static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack,
     } else if (collect_16k_bank_patches(&games[i])) {
       return 1;
     }
-    if (compress_data && pack->bank_mode == 16 &&
+    if (compress_game && pack->bank_mode == 16 &&
         games[i].bank_mode == 16) {
       /* The compressed main-window stream is added after the source banks are
        * laid out.  FF is the runtime marker for a writable RAM window. */
@@ -818,14 +833,19 @@ static int prepare_sources(GAME *games, uint32_t game_count, BANK_PACK *pack,
  * its mapper selector is used.  Streams may share output banks, so the
  * descriptor records both the KSS bank selector and the stream address. */
 static int compress_source_banks(GAME *games, uint32_t game_count,
-                                 BANK_PACK *pack, int compress_data) {
+                                 BANK_PACK *pack, int compress_all,
+                                 const GAME *compression_target) {
   uint32_t i;
 
-  if (pack->bank_mode != 16 || !compress_data)
+  if (pack->bank_mode != 16 || (!compress_all && !compression_target))
     return 0;
   for (i = 0; i < game_count; i++) {
     uint32_t j;
     uint32_t bank_data_offset;
+
+    if (!game_is_compression_target(&games[i], compression_target,
+                                    compress_all))
+      continue;
 
     if (games[i].bank_mode == 16) {
       uint8_t main_window[KSS_BANK_SIZE_16K];
@@ -1383,7 +1403,7 @@ static int build_compressed_bank_loader(uint8_t *image) {
   emit_byte(image, &pc, 0x32);
   emit_word(image, &pc, CURRENT_BUFFER_COUNT_ADDRESS + 1);
   emit_byte(image, &pc, 0x21);
-  emit_word(image, &pc, 1);
+  emit_word(image, &pc, 0xFFFF);
   emit_byte(image, &pc, 0x22);
   emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS);
   emit_byte(image, &pc, 0x11);
@@ -1537,10 +1557,16 @@ static int build_compressed_bank_loader(uint8_t *image) {
   patch_relative(image, pc - 2, elias_loop);
   emit_byte(image, &pc, 0xC9);
 
-  /* inverse_elias: same coding, but the value bits are inverted. */
+  /* offset_elias: the ZX0 offset gamma code starts with C=FE and retains the
+   * previous offset high byte in B.  This is different from normal Elias
+   * decoding and is what makes the compressed streams interoperable with the
+   * standard ZX0 encoder. */
   inverse_elias = pc;
-  emit_byte(image, &pc, 0x01);
-  emit_word(image, &pc, 1);
+  emit_byte(image, &pc, 0x3A);
+  emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS + 1);
+  emit_byte(image, &pc, 0x47); /* B = previous offset high byte */
+  emit_byte(image, &pc, 0x0E);
+  emit_byte(image, &pc, 0xFE); /* C = negative offset seed */
   uint32_t inverse_loop = pc;
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)get_bit);
@@ -1549,7 +1575,6 @@ static int build_compressed_bank_loader(uint8_t *image) {
   emit_byte(image, &pc, 0);
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)get_bit);
-  emit_byte(image, &pc, 0x3F); /* CCF: invert the value bit */
   emit_byte(image, &pc, 0xCB);
   emit_byte(image, &pc, 0x11); /* RL C */
   emit_byte(image, &pc, 0xCB);
@@ -1560,21 +1585,12 @@ static int build_compressed_bank_loader(uint8_t *image) {
   patch_relative(image, pc - 2, inverse_loop);
   emit_byte(image, &pc, 0xC9);
 
-  /* The first bit of the length after a new offset is backtracked into the
-   * offset LSB.  CURRENT_COMP_BYTE contains that bit (0 or 1). */
+  /* Decode the length bit that is backtracked into the offset LSB. */
   backtracked_elias = pc;
-  emit_byte(image, &pc, 0x3A);
-  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
-  emit_byte(image, &pc, 0xB7);
-  uint32_t backtracked_one = pc;
-  emit_byte(image, &pc, 0x20);
-  emit_byte(image, &pc, 0);
-  emit_byte(image, &pc, 0x01);
-  emit_word(image, &pc, 1);
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)get_bit);
   emit_byte(image, &pc, 0xCB);
-  emit_byte(image, &pc, 0x11); /* first value bit */
+  emit_byte(image, &pc, 0x11); /* first length bit */
   emit_byte(image, &pc, 0xCB);
   emit_byte(image, &pc, 0x10);
   uint32_t backtracked_loop = pc;
@@ -1593,7 +1609,6 @@ static int build_compressed_bank_loader(uint8_t *image) {
   emit_byte(image, &pc, 0);
   patch_relative(image, backtracked_done, pc);
   patch_relative(image, pc - 2, backtracked_loop);
-  patch_relative(image, backtracked_one, pc);
   emit_byte(image, &pc, 0xC9);
 
   copy_literals = pc;
@@ -1622,9 +1637,7 @@ static int build_compressed_bank_loader(uint8_t *image) {
   emit_byte(image, &pc, 0xE5);
   emit_byte(image, &pc, 0xD1); /* DE = destination */
   emit_byte(image, &pc, 0xEB); /* HL = destination, DE = offset */
-  emit_byte(image, &pc, 0xAF);
-  emit_byte(image, &pc, 0xED);
-  emit_byte(image, &pc, 0x52); /* HL -= DE */
+  emit_byte(image, &pc, 0x19); /* HL += negative offset */
   emit_byte(image, &pc, 0xDD);
   emit_byte(image, &pc, 0xE5);
   emit_byte(image, &pc, 0xD1); /* restore destination */
@@ -1664,47 +1677,26 @@ static int build_compressed_bank_loader(uint8_t *image) {
   new_offset = pc;
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)inverse_elias);
-  emit_byte(image, &pc, 0x78);
-  emit_byte(image, &pc, 0xFE);
-  emit_byte(image, &pc, 0x01);
-  uint32_t not_end = pc;
-  emit_byte(image, &pc, 0x20);
-  emit_byte(image, &pc, 0);
-  emit_byte(image, &pc, 0x79);
-  emit_byte(image, &pc, 0xB7);
+  emit_byte(image, &pc, 0x0C); /* INC C: offset end marker becomes zero */
   uint32_t end_jump = pc;
   emit_byte(image, &pc, 0x28);
   emit_byte(image, &pc, 0);
-  uint32_t offset_body = pc;
-  emit_byte(image, &pc, 0x0B); /* BC = offset MSB - 1 */
-  emit_byte(image, &pc, 0xC5);
+  emit_byte(image, &pc, 0x41); /* B = offset MSB */
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)read_byte);
   emit_byte(image, &pc, 0x4F); /* C = encoded offset LSB */
   emit_byte(image, &pc, 0xCB);
-  emit_byte(image, &pc, 0x39); /* SRL C; carry is backtracked length bit */
-  emit_byte(image, &pc, 0x3E);
-  emit_byte(image, &pc, 0x00);
-  emit_byte(image, &pc, 0xCE); /* A = raw LSB bit 0 */
-  emit_byte(image, &pc, 0x00);
-  emit_byte(image, &pc, 0x32);
-  emit_word(image, &pc, CURRENT_COMP_BYTE_ADDRESS);
-  emit_byte(image, &pc, 0x3E);
-  emit_byte(image, &pc, 0x7F);
-  emit_byte(image, &pc, 0x91); /* A = 127 - (raw LSB >> 1) */
-  emit_byte(image, &pc, 0x06);
-  emit_byte(image, &pc, 0x00);
-  emit_byte(image, &pc, 0x4F);
-  emit_byte(image, &pc, 0xE1); /* HL = offset MSB - 1 */
-  for (int i = 0; i < 7; i++)
-    emit_byte(image, &pc, 0x29);
-  emit_byte(image, &pc, 0x09);
-  emit_byte(image, &pc, 0x23);
-  emit_byte(image, &pc, 0x22);
+  emit_byte(image, &pc, 0x18); /* RR B; carry = first length bit */
+  emit_byte(image, &pc, 0xCB);
+  emit_byte(image, &pc, 0x19); /* RR C; carry controls backtracking */
+  emit_byte(image, &pc, 0xED);
+  emit_byte(image, &pc, 0x43); /* save the new offset */
   emit_word(image, &pc, CURRENT_LAST_OFFSET_ADDRESS);
-  emit_byte(image, &pc, 0xCD);
+  emit_byte(image, &pc, 0x01); /* BC = 1 */
+  emit_word(image, &pc, 1);
+  emit_byte(image, &pc, 0xD4); /* CALL NC,backtracked_elias */
   emit_word(image, &pc, (uint16_t)backtracked_elias);
-  emit_byte(image, &pc, 0x03);
+  emit_byte(image, &pc, 0x03); /* INC BC */
   emit_byte(image, &pc, 0xCD);
   emit_word(image, &pc, (uint16_t)copy_backref);
   uint32_t new_to_after_copy = pc;
@@ -1729,7 +1721,6 @@ static int build_compressed_bank_loader(uint8_t *image) {
   patch_relative(image, new_to_after_copy, after_copy_label);
   patch_relative(image, literals_to_after_copy, after_copy_label);
   patch_relative(image, end_jump, done);
-  patch_relative(image, not_end, offset_body);
   (void)after_literal;
   (void)literals_to_after_copy;
 
@@ -2236,10 +2227,14 @@ static uint32_t bank_pack_add_raw_chunk(BANK_PACK *pack, const uint8_t *data,
 }
 
 static int compress_source_images(GAME *games, uint32_t game_count,
-                                  BANK_PACK *pack, int compress_data) {
+                                  BANK_PACK *pack, int compress_all,
+                                  const GAME *compression_target) {
   uint32_t i;
   for (i = 0; i < game_count; i++) {
     uint32_t j;
+    int compress_game = game_is_compression_target(&games[i],
+                                                    compression_target,
+                                                    compress_all);
     games[i].chunk_count = games[i].initial_size / INITIAL_CHUNK_SIZE;
     games[i].chunks = (CHUNK_REFERENCE *)calloc(games[i].chunk_count, sizeof(*games[i].chunks));
     if (!games[i].chunks)
@@ -2259,7 +2254,7 @@ static int compress_source_images(GAME *games, uint32_t game_count,
         games[i].chunks[j].bank = 0;
         continue;
       }
-      if (!compress_data || pack->bank_mode != 16) {
+      if (!compress_game || pack->bank_mode != 16) {
         bank = bank_pack_add_raw_chunk(pack, games[i].initial + j * INITIAL_CHUNK_SIZE,
                                        &source);
         if (!bank) {
@@ -2531,7 +2526,8 @@ static void write_header(uint8_t *data, uint16_t play_address,
 
 static OUTPUT_KSS *build_output(GAME *games, uint32_t game_count,
                                 OUTPUT_TRACK *tracks, uint32_t track_count,
-                                BANK_PACK *pack) {
+                                BANK_PACK *pack, int compress_all,
+                                const GAME *compression_target) {
   uint8_t *image = NULL;
   uint32_t play_address = 0;
   uint32_t info_offset;
@@ -2577,8 +2573,8 @@ static OUTPUT_KSS *build_output(GAME *games, uint32_t game_count,
     fprintf(stderr, "bank-switch stubs overlap merged variables\n");
     goto cleanup;
   }
-  if (compress_source_images(games, game_count, pack,
-                            pack->bank_mode == 16 && pack->compression_enabled)) {
+  if (compress_source_images(games, game_count, pack, compress_all,
+                             compression_target)) {
     fprintf(stderr, "could not compress or pack source images\n");
     goto cleanup;
   }
@@ -2703,13 +2699,14 @@ static void make_mode_output_path(char *destination, size_t size,
 static int build_mode_output(const GAME *all_games, uint32_t all_count,
                              uint8_t output_mode, int auto_mode,
                              const char *output_path,
-                             int compress_data) {
+                             int compress_all, const char *compression_name) {
   GAME *games = NULL;
   uint32_t game_count = 0;
   OUTPUT_TRACK tracks[KSS_MAX_TRACKS];
   uint32_t track_count;
   BANK_PACK pack = {0};
   OUTPUT_KSS *kss = NULL;
+  GAME *compression_target = NULL;
   uint32_t i;
   int result = 1;
 
@@ -2733,12 +2730,27 @@ static int build_mode_output(const GAME *all_games, uint32_t all_count,
           (unsigned)track_count, (unsigned)output_mode, (unsigned)game_count);
   pack.bank_mode = output_mode;
   pack.bank_size = output_mode == 8 ? KSS_BANK_SIZE_8K : KSS_BANK_SIZE_16K;
-  pack.compression_enabled = (uint8_t)(compress_data && output_mode == 16);
+  if (output_mode == 16 && compression_name) {
+    for (i = 0; i < game_count; i++) {
+      if (strcasecmp(games[i].name, compression_name) == 0) {
+        compression_target = &games[i];
+        break;
+      }
+    }
+    if (!compression_target) {
+      fprintf(stderr, "compression target '%s' is not in the %uK output\n",
+              compression_name, (unsigned)output_mode);
+      goto cleanup;
+    }
+  }
+  pack.compression_enabled = (uint8_t)(
+      output_mode == 16 && (compress_all || compression_target));
   fprintf(stderr, "output bank mode: %uK\n", (unsigned)output_mode);
-  if (prepare_sources(games, game_count, &pack, pack.compression_enabled))
+  if (prepare_sources(games, game_count, &pack, compress_all,
+                      compression_target))
     goto cleanup;
   if (compress_source_banks(games, game_count, &pack,
-                            pack.compression_enabled))
+                            compress_all, compression_target))
     goto cleanup;
   if (pack.compression_enabled)
     fprintf(stderr, "ZX0 compression: enabled for the 16K output\n");
@@ -2749,13 +2761,17 @@ static int build_mode_output(const GAME *all_games, uint32_t all_count,
   for (i = 0; i < track_count; i++)
     fprintf(stderr, "adding %uK track %u: %s\n", (unsigned)output_mode,
             (unsigned)i, tracks[i].title);
-  if (pack.compression_enabled)
+  if (pack.compression_enabled && compression_target)
+    fprintf(stderr, "compressing game image %s with ZX0...\n",
+            compression_target->name);
+  else if (pack.compression_enabled)
     fprintf(stderr, "compressing %u game images with ZX0...\n",
             (unsigned)game_count);
   else
     fprintf(stderr, "packing %u game images without compression...\n",
             (unsigned)game_count);
-  kss = build_output(games, game_count, tracks, track_count, &pack);
+  kss = build_output(games, game_count, tracks, track_count, &pack,
+                     compress_all, compression_target);
   if (!kss) {
     fprintf(stderr, "failed to build merged VGM Up %uK KSS\n",
             (unsigned)output_mode);
@@ -2763,14 +2779,11 @@ static int build_mode_output(const GAME *all_games, uint32_t all_count,
   }
   {
     uint32_t stream_banks = pack.count - pack.raw_count;
-    uint32_t stream_bytes = stream_banks
-                                ? (stream_banks - 1) * pack.bank_size + pack.stream_offset
-                                : 0;
-    uint32_t stream_padding = stream_banks * pack.bank_size - stream_bytes;
+    uint32_t stream_padding = stream_banks * pack.bank_size - pack.stream_bytes;
     fprintf(stderr, "packed %u raw banks + %u stream banks: %u compressed bytes, "
                     "%u bank-padding bytes\n",
             (unsigned)pack.raw_count, (unsigned)stream_banks,
-            (unsigned)stream_bytes, (unsigned)stream_padding);
+            (unsigned)pack.stream_bytes, (unsigned)stream_padding);
   }
   if (write_file(output_path, kss->data, kss->size))
     goto cleanup;
@@ -2858,12 +2871,13 @@ static int scan_games(const char *directory, GAME **games_out, uint32_t *count_o
 }
 
 static void usage(const char *program) {
-  fprintf(stderr, "Usage: %s [--8k|--16k] [--compress-main-windows] [-o output-prefix] [vigamup-directory]\n", program);
+  fprintf(stderr, "Usage: %s [--8k|--16k] [--compress-main-windows | --compress-game NAME] [-o output-prefix] [vigamup-directory]\n", program);
   fprintf(stderr, "A vigamup directory argument is required.\n");
   fprintf(stderr, "Default output: vigamup-8k.kss and vigamup-16k.kss.\n");
   fprintf(stderr, "Default mode: auto-detect each source KSS bank mode.\n");
   fprintf(stderr, "--8k or --16k forces one output mapper mode and allows cross-conversion.\n");
   fprintf(stderr, "--compress-main-windows enables all ZX0 compression in the 16K output, including initial 8000H-BFFFH windows; raw by default.\n");
+  fprintf(stderr, "--compress-game NAME enables ZX0 compression for only one named 16K game; all other games stay raw.\n");
   fprintf(stderr, "All valid tracks are included; only the 256-song KSS limit can skip tracks.\n");
 }
 
@@ -2875,6 +2889,7 @@ int main(int argc, char **argv) {
   int first_argument = 1;
   uint8_t forced_bank_mode = 0;
   int compress_main_windows = 0;
+  const char *compress_game = NULL;
   int built = 0;
   int result = 1;
 
@@ -2897,6 +2912,15 @@ int main(int argc, char **argv) {
     if (strcmp(argv[first_argument], "--compress-main-windows") == 0) {
       compress_main_windows = 1;
       first_argument++;
+      continue;
+    }
+    if (strcmp(argv[first_argument], "--compress-game") == 0) {
+      if (first_argument + 1 >= argc || argv[first_argument + 1][0] == '\0') {
+        usage(argv[0]);
+        return 1;
+      }
+      compress_game = argv[first_argument + 1];
+      first_argument += 2;
       continue;
     }
     if (strcmp(argv[first_argument], "-o") == 0) {
@@ -2924,6 +2948,14 @@ int main(int argc, char **argv) {
     usage(argv[0]);
     return 1;
   }
+  if (compress_game && compress_main_windows) {
+    fprintf(stderr, "choose either --compress-main-windows or --compress-game\n");
+    return 1;
+  }
+  if (forced_bank_mode == 8 && compress_game) {
+    fprintf(stderr, "--compress-game requires the 16K output\n");
+    return 1;
+  }
 
   if (scan_games(directory, &games, &game_count))
     goto cleanup;
@@ -2932,7 +2964,16 @@ int main(int argc, char **argv) {
     make_mode_output_path(output_path, sizeof(output_path), output,
                           forced_bank_mode);
     if (build_mode_output(games, game_count, forced_bank_mode, 0,
-                          output_path, compress_main_windows))
+                          output_path, compress_main_windows, compress_game))
+      goto cleanup;
+    built = 1;
+  } else if (compress_game) {
+    char output_path[1024];
+    /* A one-game compression experiment is intentionally a single 16K
+     * archive containing the native 16K games. */
+    make_mode_output_path(output_path, sizeof(output_path), output, 16);
+    if (build_mode_output(games, game_count, 16, 1, output_path, 0,
+                          compress_game))
       goto cleanup;
     built = 1;
   } else {
@@ -2953,7 +2994,7 @@ int main(int argc, char **argv) {
       make_mode_output_path(output_path, sizeof(output_path), output,
                             modes[mode_index]);
       if (build_mode_output(games, game_count, modes[mode_index], 1,
-                            output_path, compress_main_windows))
+                            output_path, compress_main_windows, compress_game))
         goto cleanup;
       built = 1;
     }

@@ -28,6 +28,9 @@
 #include <SDL.h>
 #include "kss/kss.h"
 #include "kssplay.h"
+#ifdef KSS_HAVE_MOONSOUND
+#include "moonsound_opl4.h"
+#endif
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -49,6 +52,7 @@ typedef struct {
   int loops;
   int quality;
   int info_only;
+  const char *opl4_rom;
 } Options;
 
 typedef struct {
@@ -173,6 +177,7 @@ static void usage(FILE *stream, const char *program) {
           "  -rN, --rate N       Requested sample rate (default: 44100)\n"
           "  -nN, --channels N   1 or 2 output channels (default: 1)\n"
           "  -qN, --quality N    0=low, 1=high (default: 1)\n"
+          "  --opl4-rom FILE     Enable MoonSound using this YRW801 ROM\n"
           "  --info              Print archive metadata without playing\n"
           "  -h, --help          Show this help\n"
           "\n"
@@ -316,6 +321,22 @@ static int parse_options(int argc, char **argv, Options *options) {
       options->info_only = 1;
       continue;
     }
+    if (strcmp(argument, "--opl4-rom") == 0) {
+      if (++i >= argc || !argv[i][0]) {
+        fprintf(stderr, "error: --opl4-rom needs a file\n");
+        return 0;
+      }
+      options->opl4_rom = argv[i];
+      continue;
+    }
+    if (strncmp(argument, "--opl4-rom=", 11) == 0) {
+      if (!argument[11]) {
+        fprintf(stderr, "error: --opl4-rom needs a file\n");
+        return 0;
+      }
+      options->opl4_rom = argument + 11;
+      continue;
+    }
 
     if (argument[1] == '-') {
       const char *names[] = {"--song", "--seconds", "--fade", "--loops",
@@ -435,6 +456,9 @@ static int play_audio(const Options *options, KSS *kss) {
   TerminalState terminal;
   const char *driver;
   int result = 0;
+#ifdef KSS_HAVE_MOONSOUND
+  KSS_MOONSOUND *moonsound = NULL;
+#endif
 
   memset(&state, 0, sizeof(state));
   memset(&terminal, 0, sizeof(terminal));
@@ -477,6 +501,23 @@ static int play_audio(const Options *options, KSS *kss) {
     fprintf(stderr, "error: could not create KSS player\n");
     goto cleanup;
   }
+#ifdef KSS_HAVE_MOONSOUND
+  if (options->opl4_rom) {
+    char error[256];
+    moonsound = kss_moonsound_create(options->opl4_rom, state.rate, error,
+                                     sizeof(error));
+    if (!moonsound) {
+      fprintf(stderr, "error: %s\n", error);
+      goto cleanup;
+    }
+    KSSPLAY_set_moonsound(state.player, moonsound);
+  }
+#else
+  if (options->opl4_rom) {
+    fprintf(stderr, "error: this build has no MoonSound backend; configure with -DKSP_MOONSOUND_DIR=...\n");
+    goto cleanup;
+  }
+#endif
   if (KSSPLAY_set_data(state.player, kss) != 0) {
     fprintf(stderr, "error: could not attach KSS data\n");
     goto cleanup;
@@ -525,6 +566,9 @@ cleanup:
     SDL_CloseAudioDevice(device);
   }
   KSSPLAY_delete(state.player);
+#ifdef KSS_HAVE_MOONSOUND
+  kss_moonsound_delete(moonsound);
+#endif
   SDL_QuitSubSystem(SDL_INIT_AUDIO);
   return result;
 }
