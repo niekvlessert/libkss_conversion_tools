@@ -60,8 +60,6 @@ typedef struct {
 typedef struct {
   int is_ksp;
   KSP_INDEX index;
-  uint8_t *mwk_data;
-  uint32_t mwk_size;
 } KSPResources;
 
 typedef struct {
@@ -475,7 +473,6 @@ static int parse_options(int argc, char **argv, Options *options) {
 
 static int load_ksp_resources(const char *path, KSPResources *resources) {
   char error[256];
-  uint32_t i;
 
   memset(resources, 0, sizeof(*resources));
   if (!ksp_validate_file(path, 1, &resources->index, error, sizeof(error))) {
@@ -483,27 +480,23 @@ static int load_ksp_resources(const char *path, KSPResources *resources) {
     return 0;
   }
   resources->is_ksp = 1;
-  for (i = 0; i < resources->index.entry_count; i++) {
-    KSP_ENTRY *entry = &resources->index.entries[i];
-    if (entry->id == 0 && strcmp(entry->type, "MWK ") == 0) {
-      if (!ksp_read_chunk(path, entry, &resources->mwk_data, error,
-                          sizeof(error))) {
-        fprintf(stderr, "error: could not read embedded MWK: %s\n", error);
-        ksp_free_index(&resources->index);
-        memset(resources, 0, sizeof(*resources));
-        return -1;
-      }
-      resources->mwk_size = entry->unpacked_size;
-      break;
-    }
-  }
   return 1;
+}
+
+static const KSP_ENTRY *ksp_song_entry(const KSPResources *resources,
+                                       uint32_t song) {
+  uint32_t i;
+  if (!resources) return NULL;
+  for (i = 0; i < resources->index.entry_count; i++) {
+    const KSP_ENTRY *entry = &resources->index.entries[i];
+    if (entry->id == song && !strcmp(entry->type, "SONG")) return entry;
+  }
+  return NULL;
 }
 
 static void release_ksp_resources(KSPResources *resources) {
   if (!resources)
     return;
-  free(resources->mwk_data);
   if (resources->is_ksp)
     ksp_free_index(&resources->index);
   memset(resources, 0, sizeof(*resources));
@@ -513,7 +506,15 @@ static void print_info(const KSS *kss, const KSPResources *resources) {
   if (resources && resources->is_ksp) {
     printf("container: KSP1\n");
     printf("KSP chunks: %u\n", resources->index.entry_count);
-    printf("embedded MWK: %s\n", resources->mwk_data ? "yes" : "no");
+    {
+      uint32_t i, song_count = 0, mwk_count = 0;
+      for (i = 0; i < resources->index.entry_count; i++) {
+        if (!strcmp(resources->index.entries[i].type, "SONG")) song_count++;
+        if (!strcmp(resources->index.entries[i].type, "MWK ")) mwk_count++;
+      }
+      printf("embedded resources: %u SONG(s), %u MWK(s)\n", song_count,
+             mwk_count);
+    }
   } else {
     printf("container: KSS\n");
   }
@@ -655,12 +656,32 @@ static int play_audio(const Options *options, KSS *kss,
       fprintf(stderr, "error: %s\n", error);
       goto cleanup;
     }
-    if (!options->mwk_path && resources && resources->mwk_data &&
-        !kss_moonsound_load_mwk_data(moonsound, resources->mwk_data,
-                                      resources->mwk_size, error,
-                                      sizeof(error))) {
-      fprintf(stderr, "error: embedded MWK could not be loaded: %s\n", error);
-      goto cleanup;
+    if (!options->mwk_path && resources && resources->is_ksp) {
+      const KSP_ENTRY *mwk_entry = NULL;
+      uint8_t *mwk_data = NULL;
+      uint32_t i;
+      const KSP_ENTRY *song_entry = ksp_song_entry(resources,
+                                                   (uint32_t)options->song);
+      uint32_t mwk_id = song_entry ? song_entry->aux : (uint32_t)options->song;
+      for (i = 0; i < resources->index.entry_count; i++) {
+        KSP_ENTRY *entry = &resources->index.entries[i];
+        if (entry->id == mwk_id &&
+            !strcmp(entry->type, "MWK ")) {
+          mwk_entry = entry;
+          break;
+        }
+      }
+      if (mwk_entry &&
+          (!ksp_read_chunk(options->input, mwk_entry, &mwk_data, error,
+                           sizeof(error)) ||
+           !kss_moonsound_load_mwk_data(moonsound, mwk_data,
+                                        mwk_entry->unpacked_size, error,
+                                        sizeof(error)))) {
+        free(mwk_data);
+        fprintf(stderr, "error: embedded MWK could not be loaded: %s\n", error);
+        goto cleanup;
+      }
+      free(mwk_data);
     }
     KSSPLAY_set_moonsound(state.player, moonsound);
     fprintf(stderr, "MoonSound: using YRW801 ROM %s\n", opl4_rom);
@@ -757,7 +778,8 @@ int main(int argc, char **argv) {
 
   if (resources.is_ksp && ksp_index_is_compact(&resources.index)) {
     char error[256];
-    if (!ksp_build_kss_image(options.input, &resources.index,
+    if (!ksp_build_kss_image_for_song(options.input, &resources.index,
+                                      (uint32_t)options.song,
                              &compact_kss_image, &compact_kss_size, error,
                              sizeof(error))) {
       fprintf(stderr, "error: cannot materialize compact KSP: %s\n", error);

@@ -37,7 +37,9 @@ The directory begins with:
 
 Each 32-byte entry contains a FourCC, ID, absolute file offset, packed and
 unpacked sizes, CRC32 of the unpacked data, compression ID, flags, and an
-auxiliary value. Version 1 defines these compression IDs:
+auxiliary value. For `SONG` entries, `aux` is the matching `MWK ` ID, or
+`0xFFFFFFFF` when the song has no sample kit. Other chunk types currently use
+`aux=0`. Version 1 defines these compression IDs:
 
 - `0`: uncompressed;
 - `1`: forward ZX0 stream (current ZX0 format, non-classic mode).
@@ -54,9 +56,15 @@ between the header and the first chunk.
 The initial required chunks are:
 
 - `ENGN`, ID 0: supplied Z80 engine binary;
-- `SONG`, ID 0: supplied MBWave song/resource binary. MBWave loaders compact
-  its pattern blocks when materializing the KSS image;
+- `SONG`, ID `n`: supplied MBWave song/resource binary. MBWave loaders compact
+  its pattern blocks when materializing the KSS image. A KSP may contain
+  multiple songs, each with a distinct ID;
 - `EDES`, ID 0: the 36-byte `KED1` engine descriptor.
+
+An optional `MWK ` chunk with ID `n` is a sample kit referenced by one or more
+`SONG` entries through their auxiliary value. Identical MWK contents should
+be stored once and referenced by multiple songs. `ENGN` and `EDES` remain
+shared by all songs.
 
 `META`, ID 0 is optional UTF-8 text using `key=value` lines.
 
@@ -66,6 +74,17 @@ required chunks. The packer accepts the engine descriptor as a simple
 supplied KSS prefix contributes only its first 32-byte header; its load image
 is discarded because the engine and song are stored in the chunks.
 
+Use repeated `--song` and `--mwk` arguments with `mbwave2ksp` to create a
+multi-song archive. The arguments correspond by order; for example:
+
+```text
+mbwave2ksp --driver WAVEDRVR.BIN \
+  --song FIRST.MWM --mwk FIRST.MWK \
+  --song SECOND.MWM --mwk SECOND.MWK \
+  --output collection.ksp
+```
+
+`kspplayer --song 1 collection.ksp` selects `SONG[1]` and `MWK[1]`.
 Use `--zx0` with `mbwave2ksp` or `kspack` to opt in to compression. The DMV
 batch converter exposes the same option; its default output remains
 uncompressed.

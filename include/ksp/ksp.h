@@ -20,6 +20,7 @@ typedef struct {
    * compression would not make it smaller. ZX0 is supported for ENGN and
    * SONG chunks only. */
   uint16_t compression;
+  uint32_t aux;
 } KSP_CHUNK;
 
 typedef struct {
@@ -64,6 +65,13 @@ int ksp_index_is_compact(const KSP_INDEX *index);
 int ksp_build_kss_image(const char *path, const KSP_INDEX *index,
                         uint8_t **image, uint32_t *image_size,
                         char *error, size_t error_size);
+
+/* Materialize one SONG resource from a multi-track KSP.  The matching MWK
+ * resource uses the same entry ID, when present. */
+int ksp_build_kss_image_for_song(const char *path, const KSP_INDEX *index,
+                                 uint32_t song_id, uint8_t **image,
+                                 uint32_t *image_size, char *error,
+                                 size_t error_size);
 
 void ksp_free_index(KSP_INDEX *index);
 uint32_t ksp_crc32(const uint8_t *data, size_t size);

@@ -198,7 +198,7 @@ int ksp_write_file(const char *output_path, const uint8_t *kss_prefix,
     put32(entry + 20, layouts[i].crc32);
     put16(entry + 24, layouts[i].compression);
     put16(entry + 26, 0);
-    put32(entry + 28, 0);
+    put32(entry + 28, chunks[i].aux);
   }
 
   file = fopen(output_path, "wb");
@@ -400,7 +400,7 @@ int ksp_validate_file(const char *path, int verify_crc, KSP_INDEX *index,
       return 0;
     }
     if (!memcmp(p, "ENGN", 4) && get32(p + 4) == 0) has_engine = 1;
-    if (!memcmp(p, "SONG", 4) && get32(p + 4) == 0) has_song = 1;
+    if (!memcmp(p, "SONG", 4)) has_song = 1;
     if (!memcmp(p, "EDES", 4) && get32(p + 4) == 0) {
       if (!ksp_validate_engine_descriptor(chunk_data, unpacked_size,
                                           error, error_size)) {
@@ -543,9 +543,10 @@ static void decode_descriptor(const uint8_t *data,
   descriptor->flags = get32(data + 32);
 }
 
-int ksp_build_kss_image(const char *path, const KSP_INDEX *index,
-                        uint8_t **image, uint32_t *image_size,
-                        char *error, size_t error_size) {
+int ksp_build_kss_image_for_song(const char *path, const KSP_INDEX *index,
+                                 uint32_t song_id, uint8_t **image,
+                                 uint32_t *image_size, char *error,
+                                 size_t error_size) {
   const KSP_ENTRY *engine_entry;
   const KSP_ENTRY *song_entry;
   const KSP_ENTRY *descriptor_entry;
@@ -576,7 +577,7 @@ int ksp_build_kss_image(const char *path, const KSP_INDEX *index,
     return 0;
   }
   engine_entry = find_entry(index, "ENGN", 0);
-  song_entry = find_entry(index, "SONG", 0);
+  song_entry = find_entry(index, "SONG", song_id);
   descriptor_entry = find_entry(index, "EDES", 0);
   if (!engine_entry || !song_entry || !descriptor_entry) {
     fail(error, error_size, "compact KSP is missing a required chunk");
@@ -682,6 +683,13 @@ cleanup:
   free(descriptor_data);
   free(compact_song);
   return ok;
+}
+
+int ksp_build_kss_image(const char *path, const KSP_INDEX *index,
+                        uint8_t **image, uint32_t *image_size,
+                        char *error, size_t error_size) {
+  return ksp_build_kss_image_for_song(path, index, 0, image, image_size,
+                                      error, error_size);
 }
 
 void ksp_free_index(KSP_INDEX *index) {

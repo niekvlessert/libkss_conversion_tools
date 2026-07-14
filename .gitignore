@@ -6,3 +6,4 @@ old/
 sng/*
 *.zip
 vigamup
+__pycache__
