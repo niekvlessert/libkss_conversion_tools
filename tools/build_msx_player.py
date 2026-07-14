@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Build the BASIC-launched MSX KSP player disk directory.
-
-The current diagnostic MSX bootstrap embeds a materialized KSS image in
-KSPPLAY.BIN. Compact KSP files are materialized with kspmaterialize first;
-the original compact KSP remains beside it as the selectable source archive.
-"""
+"""Build the BASIC-launched, ZX0-packed MSX KSP test player."""
 
 import argparse
 import pathlib
@@ -34,16 +29,34 @@ def write_msx_binary(path: pathlib.Path, payload: bytes, load: int, execute: int
     path.write_bytes(struct.pack("<BHHH", 0xFE, load, end, execute) + payload)
 
 
+def relocated_zx0_decoder(address: int) -> bytes:
+    decoder = bytearray.fromhex(
+        "01ffffc5033e80cd3500edb087380dcd3500e3e519edb0e1e38730ebc10efe"
+        "cd36000cc8414e23cb18cb19c5010100d43d000318dd0c8720037e2317d887"
+        "cb11cb1018f2"
+    )
+    for offset, target in ((8, 0x35), (16, 0x35), (32, 0x36), (48, 0x3D)):
+        struct.pack_into("<H", decoder, offset, address + target)
+    return bytes(decoder)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ksp", type=pathlib.Path,
-                        default=pathlib.Path("dutch_moonsound_veterans/ksp/DMV1/INTRO1.ksp"))
+                        default=pathlib.Path(
+                            "dutch_moonsound_veterans/ksp/DMV1/ALMOSEND_compressed.ksp"
+                        ))
     parser.add_argument("--output-dir", type=pathlib.Path, default=pathlib.Path("msx"))
     parser.add_argument("--assembler", default="z80asm")
     parser.add_argument(
         "--kspmaterialize",
         type=pathlib.Path,
         help="kspmaterialize executable (default: build-moonsound/kspmaterialize or build/kspmaterialize)",
+    )
+    parser.add_argument(
+        "--zx0pack",
+        type=pathlib.Path,
+        help="zx0pack executable (default: build-moonsound/zx0pack or build/zx0pack)",
     )
     args = parser.parse_args()
 
@@ -68,19 +81,22 @@ def main() -> int:
             subprocess.run([str(materializer), str(ksp_path), str(materialized)], check=True)
             prefix = read_kss_prefix(materialized)
 
-    entry_name = ksp_path.stem.upper() + ".KSP"
-    pfx_name = ksp_path.stem.upper() + ".PFX"
+    entry_stem = ksp_path.stem
+    if entry_stem.lower().endswith("_compressed"):
+        entry_stem = entry_stem[:-len("_compressed")]
+    entry_stem = entry_stem.upper()[:8]
+    entry_name = entry_stem + ".KSP"
     output_ksp = output_dir / entry_name
-    output_pfx = output_dir / pfx_name
     shutil.copyfile(ksp_path, output_ksp)
-    output_pfx.write_bytes(prefix)
     source_text = source_template.read_text(encoding="ascii")
     source_text = source_text.replace("@@ENTRY@@", entry_name)
-    source_text = source_text.replace("@@PFX@@", pfx_name)
+    source_text = source_text.replace("@@ENGINE_ZX0@@", "ENGINE.ZX0")
+    source_text = source_text.replace("@@SONG_ZX0@@", "SONG.ZX0")
+    source_text = source_text.replace("@@DZX0@@", "DZX0.BIN")
     (output_dir / "KSPPLAY.BAS").write_bytes(
         b'10 CLS\r\n'
-        b'20 PRINT "KSP STAGE 7: VDP-CLOCKED PLAYBACK"\r\n'
-        b'30 PRINT "INIT returns, then engine runs at 60 Hz."\r\n'
+        b'20 PRINT "KSP ZX0 MOONSOUND PLAYBACK"\r\n'
+        b'30 PRINT "Loading compact engine and song..."\r\n'
         b'40 BLOAD "KSPPLAY.BIN",R\r\n'
     )
     (output_dir / "README.md").write_text(
@@ -88,8 +104,9 @@ def main() -> int:
         "Mount this directory as a disk in openMSX with Disk BASIC. Then run:\n\n"
         "```basic\nRUN \"KSPPLAY.BAS\"\n```\n\n"
         f"The machine-code bootstrap displays progress, starts the embedded `{entry_name}`"
-        " payload, initializes track 0, and waits for the MoonSound interrupt hook."
-        " The materialized KSS image is embedded in `KSPPLAY.BIN` for this first"
+        " payload, initializes track 0, and drives playback at 60 Hz."
+        " The materialized engine and song are independently ZX0-packed inside"
+        " `KSPPLAY.BIN`; the BIN remains below C000H so Disk BASIC can load it safely."
         f" BASIC/BIN version; `{entry_name}` is kept on disk as the compact source archive."
         " A MoonSound/OPL4 cartridge with its YRW801 ROM is required.\n",
         encoding="ascii",
@@ -97,14 +114,29 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="ksp-msx-") as temporary:
         temporary_dir = pathlib.Path(temporary)
-        shutil.copyfile(output_pfx, temporary_dir / pfx_name)
+        if len(prefix) <= 0x4000:
+            raise ValueError("materialized KSP has no song window above 8000H")
+        (temporary_dir / "ENGINE.RAW").write_bytes(prefix[:0x4000])
+        (temporary_dir / "SONG.RAW").write_bytes(prefix[0x4000:])
+        pack_candidates = [args.zx0pack] if args.zx0pack else [
+            pathlib.Path("build-moonsound/zx0pack"),
+            pathlib.Path("build/zx0pack"),
+        ]
+        packer = next((path.resolve() for path in pack_candidates if path and path.is_file()), None)
+        if packer is None:
+            raise ValueError("zx0pack was not found; build the zx0pack CMake target first")
+        subprocess.run([str(packer), "ENGINE.RAW", "ENGINE.ZX0"],
+                       cwd=temporary_dir, check=True)
+        subprocess.run([str(packer), "SONG.RAW", "SONG.ZX0"],
+                       cwd=temporary_dir, check=True)
+        (temporary_dir / "DZX0.BIN").write_bytes(relocated_zx0_decoder(0xBF00))
         assembled = temporary_dir / "KSPPLAY.raw"
         source = temporary_dir / "KSPPLAY.asm"
         source.write_text(source_text, encoding="ascii")
         subprocess.run([args.assembler, "-o", str(assembled), source.name],
                        cwd=temporary_dir, check=True)
         payload = assembled.read_bytes()
-    write_msx_binary(output_dir / "KSPPLAY.BIN", payload, 0x9000, 0x9000)
+    write_msx_binary(output_dir / "KSPPLAY.BIN", payload, 0x8000, 0x8000)
 
     print(f"wrote {output_dir / 'KSPPLAY.BIN'} ({len(payload)} bytes of Z80 payload)")
     print(f"wrote {output_ksp} ({output_ksp.stat().st_size} bytes)")

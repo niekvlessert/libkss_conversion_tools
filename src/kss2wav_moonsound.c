@@ -23,7 +23,7 @@ static void put32(uint8_t *p, uint32_t value) {
 
 static void usage(const char *program) {
   fprintf(stderr,
-          "Usage: %s --rom YRW801.ROM [--mwk KIT.MWK] [--song N] [--seconds N] INPUT.KSS OUTPUT.WAV\n",
+          "Usage: %s --rom YRW801.ROM [--mwk KIT.MWK] [--song N] [--seconds N] [--trace-io FILE] INPUT.KSS OUTPUT.WAV\n",
           program);
 }
 
@@ -58,11 +58,39 @@ static int write_wav_header(FILE *file, uint32_t frames) {
 }
 
 static uint32_t io_counts[256];
+static FILE *io_trace;
+static uint32_t io_sequence;
+static uint8_t io_wave_register;
+
+static void trace_memory(void *context, uint32_t address, uint32_t data) {
+  KSSPLAY *player = (KSSPLAY *)context;
+  if (io_trace && address >= 0x4cb5u && address < 0x4cc9u)
+    fprintf(io_trace, "MEM PC=%04X ADDR=%04X VALUE=%02X\n",
+            (unsigned)(player->vm->context.pc & 0xffffu),
+            (unsigned)(address & 0xffffu), (unsigned)(data & 0xffu));
+}
 
 static void trace_io(void *context, uint32_t port, uint32_t data) {
-  (void)context;
-  (void)data;
+  KSSPLAY *player = (KSSPLAY *)context;
+  uint32_t iy;
+  unsigned i;
   io_counts[port & 0xffu]++;
+  if ((port & 0xffu) == 0x7e)
+    io_wave_register = (uint8_t)data;
+  if (io_trace) {
+    fprintf(io_trace, "%08u %02X %02X\n", io_sequence++,
+            (unsigned)(port & 0xffu), (unsigned)(data & 0xffu));
+    if ((port & 0xffu) == 0x7f && io_wave_register == 0x7b && player) {
+      iy = (uint32_t)player->vm->context.regs8[REGID_IYL] |
+           ((uint32_t)player->vm->context.regs8[REGID_IYH] << 8);
+      fprintf(io_trace, "STATE PC=%04X IY=%04X DATA=",
+              (unsigned)(player->vm->context.pc & 0xffffu), (unsigned)iy);
+      for (i = 0; i < 20; i++)
+        fprintf(io_trace, "%02X", (unsigned)MMAP_read_memory(player->vm->mmap,
+                                                               (iy + i) & 0xffffu));
+      fputc('\n', io_trace);
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -70,6 +98,7 @@ int main(int argc, char **argv) {
   const char *mwk_path = NULL;
   const char *input_path = NULL;
   const char *output_path = NULL;
+  const char *trace_path = NULL;
   int song = 0;
   int seconds = 10;
   int i;
@@ -101,6 +130,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "error: invalid duration\n");
         return 2;
       }
+    } else if (strcmp(argv[i], "--trace-io") == 0 && i + 1 < argc) {
+      trace_path = argv[++i];
+    } else if (strncmp(argv[i], "--trace-io=", 11) == 0) {
+      trace_path = argv[i] + 11;
     } else if (argv[i][0] != '-' && !input_path) {
       input_path = argv[i];
     } else if (argv[i][0] != '-' && !output_path) {
@@ -150,7 +183,20 @@ int main(int argc, char **argv) {
   }
   KSSPLAY_set_moonsound(player, moonsound);
   memset(io_counts, 0, sizeof(io_counts));
-  KSSPLAY_set_iowrite_handler(player, NULL, trace_io);
+  io_sequence = 0;
+  io_wave_register = 0;
+  if (trace_path) {
+    io_trace = fopen(trace_path, "w");
+    if (!io_trace) {
+      fprintf(stderr, "error: could not create I/O trace %s\n", trace_path);
+      kss_moonsound_delete(moonsound);
+      KSSPLAY_delete(player);
+      KSS_delete(kss);
+      return 1;
+    }
+  }
+  KSSPLAY_set_iowrite_handler(player, player, trace_io);
+  KSSPLAY_set_memwrite_handler(player, player, trace_memory);
   KSSPLAY_reset(player, (uint32_t)song, 0);
   total_frames = (uint32_t)seconds * 44100u;
 
@@ -178,6 +224,10 @@ int main(int argc, char **argv) {
     remaining -= frames;
   }
   fclose(output);
+  if (io_trace) {
+    fclose(io_trace);
+    io_trace = NULL;
+  }
   fprintf(stderr, "rendered %u stereo frames to %s; MoonSound writes: "
                   "7E=%u 7F=%u C4=%u C5=%u C6=%u C7=%u\n",
           total_frames, output_path, io_counts[0x7e], io_counts[0x7f],

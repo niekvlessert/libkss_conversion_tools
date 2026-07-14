@@ -39,6 +39,10 @@ target_link_libraries(kspmaterialize PRIVATE ksp)
 target_include_directories(kspmaterialize PRIVATE include)
 target_include_directories(kspvalidate PRIVATE include)
 
+add_executable(zx0pack tools/zx0pack.c)
+target_link_libraries(zx0pack PRIVATE ksp)
+target_include_directories(zx0pack PRIVATE src)
+
 add_executable(mbwave_extract tools/mbwave_extract.c)
 
 add_executable(mbwave2ksp tools/mbwave2ksp.c)
