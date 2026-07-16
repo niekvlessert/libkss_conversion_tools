@@ -628,7 +628,10 @@ probe_qcpx_header:
         ret     nz
         ld      a,(header+0x24)
         cp      'X'
+        jr      z,probe_qcpx_header_found
+        cp      'Z'
         ret     nz
+probe_qcpx_header_found:
         ld      a,1
         ld      (qcpx_file),a
         ; The five logical pages are records in one container.  Native MSX

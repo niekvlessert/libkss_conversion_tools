@@ -1363,7 +1363,10 @@ qcp_page_count: defb    0
 qcp_track_count:defb    0
 qcp_page_index: defb    0
 qcp_selected_page: defb 0
+qcp_materialized_page: defb 0xFF
 qcp_original_song:  defb 0
+qcp_current_song:   defb 0
+qcp_key_latch:      defb 0
 qcp_dest_segment:   defb 0
 qcp_selected_segment:defb 0
 qcp_value:      defb    0
@@ -1374,6 +1377,11 @@ qcp_page_data_address:defw 0
 qcp_engine_source:  defw 0
 qcp_common_source:  defw 0
 qcp_records_source: defw 0
+qcp_data_source:defw 0
+qcp_patch_source:defw 0
+qcp_engine_compressed_size:defw 0
+qcp_common_compressed_size:defw 0
+qcp_data_compressed_size:defw 0
 qcp_cursor:     defw    0
 qcp_data_size:  defw    0
 qcp_patch_count:defw    0
@@ -1499,17 +1507,27 @@ runtime_ready_impl:
 qcpx_runtime_path:
         call    qcpx_parse
         jp      c,format_error
+        ld      a,0xFF
+        ld      (qcp_materialized_page),a
+        ld      a,(song_number)
+        ld      (qcp_current_song),a
         call    qcpx_get_song_mapping
         jp      c,format_error
         call    qcpx_materialize_selected
         jp      c,format_error
 
-        ; Install only the fixed page-3 runtime helpers.  Do not install the
-        ; old page-0 RST 28H gateway: QCPX's complete pages never bank-switch
-        ; through page 0 and page 0 must remain DOS2-owned.
-        call    install_runtime_stubs
-        ; install_runtime_stubs places the legacy shadow-copy wrapper at
-        ; CC20H. Replace it in-place with a direct QCPX wrapper. BIOS/DOS can
+        ; Keep the QCPX parser/materializer resident for live track changes.
+        ; The legacy runtime installer would overwrite it with bank handlers
+        ; and SCC shadow buffers, none of which this complete-page path uses.
+        ld      hl,qcpx_return_stub
+        ld      de,RETURN_STUB
+        ld      bc,qcpx_return_stub_end-qcpx_return_stub
+        ldir
+        xor     a
+        ld      (HTIMI_INSTALLED),a
+
+        ; Install a direct QCPX wrapper outside the retained materializer.
+        ; BIOS/DOS can
         ; restore its normal mapper and slot layout while servicing HALT, so
         ; every PLAY must first reassert page 1 and the page-2 SCC slot.
         ;
@@ -1539,9 +1557,9 @@ qcpx_runtime_path:
         inc     hl
         ld      (hl),0xCD
         inc     hl
-        ld      (hl),0x00
+        ld      (hl),CUSTOM_ENASLT & 0xFF
         inc     hl
-        ld      (hl),0xCF
+        ld      (hl),CUSTOM_ENASLT >> 8
         inc     hl
         ld      (hl),0x21
         inc     hl
@@ -1616,18 +1634,143 @@ qcpx_runtime_path:
         call    PUT_P1_DISPATCH
         jp      init_trampoline
 
+; The copied loop remains outside page 1, so it can replace the complete
+; engine/music page while changing tracks.
+qcpx_return_stub:
+        im      1
+        ei
+qcpx_return_halt:
+        halt
+        call    PLAY_WRAPPER
+        di
+        ; Quarth happens to retain useful Z80 state between PLAY calls.
+        ; Keyboard scanning is player bookkeeping and must be invisible to
+        ; the engine when no track change is requested.
+        push    af
+        push    bc
+        push    de
+        push    hl
+        push    ix
+        push    iy
+        call    qcpx_poll_keyboard
+        pop     iy
+        pop     ix
+        pop     hl
+        pop     de
+        pop     bc
+        pop     af
+        ei
+        jr      qcpx_return_halt
+qcpx_return_stub_end:
+
+qcpx_poll_keyboard:
+        ; Poll keyboard row 8 directly through the PPI. BIOS keyboard calls
+        ; can invoke slot-dependent code while page 1 contains QCPX RAM.
+        ; Row 8: bit 0=Right, bit 3=Left, bit 7=Space (active low).
+        in      a,(0xAA)
+        ld      c,a
+        and     0xF0
+        or      8
+        out     (0xAA),a
+        in      a,(0xA9)
+        cpl
+        and     0x89
+        ld      b,a
+        ld      a,c
+        out     (0xAA),a
+        ld      a,b
+        or      a
+        jr      nz,qcpx_key_pressed
+        xor     a
+        ld      (qcp_key_latch),a
+        ret
+qcpx_key_pressed:
+        ld      c,a
+        ld      a,(qcp_key_latch)
+        or      a
+        ret     nz
+        ld      a,1
+        ld      (qcp_key_latch),a
+        bit     0,c
+        jr      nz,qcpx_next_song
+        bit     3,c
+        jr      nz,qcpx_previous_song
+        bit     7,c
+        ret     z
+        ld      a,(qcp_current_song)
+        jp      qcpx_switch_song
+
+qcpx_next_song:
+        ld      a,(qcp_current_song)
+        inc     a
+        ld      c,a
+        ld      a,(qcp_track_count)
+        cp      c
+        ld      a,c
+        jr      nz,qcpx_switch_song
+        xor     a
+        jr      qcpx_switch_song
+
+qcpx_previous_song:
+        ld      a,(qcp_current_song)
+        or      a
+        jr      nz,qcpx_previous_decrement
+        ld      a,(qcp_track_count)
+qcpx_previous_decrement:
+        dec     a
+
+qcpx_switch_song:
+        di
+        ld      (qcp_current_song),a
+        ld      (song_number),a
+        call    qcpx_silence
+        call    qcpx_get_song_mapping
+        jp      c,format_error
+        call    qcpx_materialize_selected
+        jp      c,format_error
+        ld      a,(qcp_original_song)
+        ld      (song_number),a
+        call    install_init_trampoline
+        ld      a,(qcp_selected_segment)
+        call    PUT_P1_DISPATCH
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      h,0x80
+        call    CUSTOM_ENASLT
+        ld      a,0x3F
+        ld      (0x9000),a
+        jp      init_trampoline
+
+qcpx_silence:
+        xor     a
+        ld      hl,0x988A
+        ld      b,6
+qcpx_silence_scc:
+        ld      (hl),a
+        inc     hl
+        djnz    qcpx_silence_scc
+        ld      b,3
+        ld      c,8
+qcpx_silence_psg:
+        ld      a,c
+        out     (0xA0),a
+        xor     a
+        out     (0xA1),a
+        inc     c
+        djnz    qcpx_silence_psg
+        ret
+
 qcpx_parse:
         ; Header fields are little-endian and live at QCPX+04..0F.
         ld      hl,0x25
         call    qcpx_set_source
         call    qcpx_read_byte
         cp      1
-        jr      nz,qcpx_parse_bad
+        jp      nz,qcpx_parse_bad
         call    qcpx_read_byte
         or      a
-        jr      z,qcpx_parse_bad
+        jp      z,qcpx_parse_bad
         cp      33
-        jr      nc,qcpx_parse_bad
+        jp      nc,qcpx_parse_bad
         ld      (qcp_page_count),a
         call    qcpx_read_byte
         ld      (qcp_track_count),a
@@ -1660,6 +1803,10 @@ qcpx_parse:
         cp      0x40
         jr      nc,qcpx_parse_bad
 
+        ld      a,(qcp_format)
+        cp      2
+        jr      z,qcpz_parse_sources
+
         ; The shared blobs and page records are addressed from the original
         ; file, whose QCPX signature starts at offset 21H.
         ld      hl,0x231
@@ -1672,6 +1819,30 @@ qcpx_parse:
         ld      (qcp_records_source),hl
         or      a
         ret
+
+; QCPZ_PARSE_BEGIN
+qcpz_parse_sources:
+        ; QCPZ's fixed directory follows the two 256-byte song maps. Stream
+        ; offsets are relative to the QCPZ magic at file offset 21H.
+        ld      hl,0x231
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_engine_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_engine_source),hl
+        call    qcpx_read_word
+        ld      (qcp_common_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_common_source),hl
+        ld      hl,0x239
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+; QCPZ_PARSE_END
 qcpx_parse_bad:
         scf
         ret
@@ -1760,6 +1931,9 @@ qcpx_mapping_bad:
         ret
 
 qcpx_materialize_selected:
+        ld      a,(qcp_format)
+        cp      2
+        jp      z,qcpz_materialize_selected
         ; Only one physical page is required on MSX.  The selected logical
         ; record is expanded into the first allocated KSS segment; selecting
         ; another song later simply rebuilds this same segment.
@@ -1769,6 +1943,196 @@ qcpx_materialize_selected:
         ld      (qcp_selected_segment),a
         call    qcpx_materialize_page
         ret
+
+; QCPZ keeps the already expanded engine/common templates in the one page-1
+; destination. A same-page song change only resets runtime state. A cross-page
+; change replaces the payload and reapplies that page's pointer patches.
+; QCPZ_BOOTSTRAP_BEGIN
+qcpz_materialize_selected:
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        ld      (qcp_dest_segment),a
+        call    qcpz_read_selected_descriptor
+        ld      a,(qcp_materialized_page)
+        cp      0xFF
+        jr      z,qcpz_materialize_initial
+        ld      c,a
+        ld      a,(qcp_selected_page)
+        cp      c
+        jr      z,qcpz_reset_workspace
+
+        ; Keep engine/common intact. Remove stale payload and writable state,
+        ; then expand only the newly selected logical music page.
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x65B5),a
+        ld      hl,0x65B5
+        ld      de,0x65B6
+        ld      bc,0x1A4A
+        ldir
+        jr      qcpz_expand_payload
+
+qcpz_materialize_initial:
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x4000),a
+        ld      hl,0x4000
+        ld      de,0x4001
+        ld      bc,0x3FFF
+        ldir
+
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        ld      bc,(qcp_engine_compressed_size)
+        ld      (qcp_data_compressed_size),bc
+        ld      de,0x4000
+        call    qcpz_decompress_source
+
+        ld      hl,(qcp_common_source)
+        call    qcpx_set_source
+        ld      bc,(qcp_common_compressed_size)
+        ld      (qcp_data_compressed_size),bc
+        ld      de,0x4000
+        ld      hl,(qcp_engine_size)
+        add     hl,de
+        ex      de,hl
+        call    qcpz_decompress_source
+
+qcpz_expand_payload:
+        ld      hl,(qcp_data_source)
+        call    qcpx_set_source
+        ld      de,(qcp_page_data_address)
+        call    qcpz_decompress_source
+        ld      hl,(qcp_patch_source)
+        call    qcpx_set_source
+        call    qcpx_apply_patches
+        ld      a,(qcp_selected_page)
+        ld      (qcp_materialized_page),a
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
+        ret
+
+qcpz_reset_workspace:
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x7D00),a
+        ld      hl,0x7D00
+        ld      de,0x7D01
+        ld      bc,0x028B
+        ldir
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
+        ret
+
+qcpz_read_selected_descriptor:
+        ; Five fixed ten-byte descriptors: raw size, patch count, compressed
+        ; size, compressed stream offset, patch-table offset.
+        ld      a,(qcp_selected_page)
+        ld      e,a
+        ld      d,0
+        ld      l,e
+        ld      h,d
+        add     hl,hl
+        add     hl,hl
+        add     hl,de
+        add     hl,hl
+        ld      de,(qcp_records_source)
+        add     hl,de
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_data_size),hl
+        call    qcpx_read_word
+        ld      (qcp_patch_count),hl
+        call    qcpx_read_word
+        ld      (qcp_data_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_data_source),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_patch_source),hl
+        ret
+
+qcpz_decompress_source:
+        ; Source stream is guaranteed by the builder to remain within one
+        ; 16K staged-file segment. Temporarily replace SCC page 2 by mapper
+        ; RAM, decode into the persistent page-1 destination, then let the
+        ; caller restore SCC after all materialization has completed.
+        push    de
+        call    qcpz_select_ram_page2
+        call    qcpz_map_source_page2
+        pop     de
+        ld      hl,(source_position)
+        ld      a,h
+        and     0x3F
+        or      0x80
+        ld      h,a
+        call    qcpz_zx0_decoder
+        ret
+
+qcpz_select_ram_page2:
+        ; Select RAMAD1's primary slot in page 2 without calling ENASLT.
+        ; This code runs in page 3, so preserve both page-3 primary bits and
+        ; (for an expanded slot) page-3 secondary bits exactly.
+        ld      a,(BIOS_RAMAD1)
+        ld      b,a
+        and     3
+        rlca
+        rlca
+        rlca
+        rlca
+        ld      c,a
+        in      a,(0xA8)
+        and     0xCF
+        or      c
+        out     (0xA8),a
+        bit     7,b
+        ret     z
+
+        ; FFFFH is accessible because the RAM primary slot is already the
+        ; one visible in page 3. Reads are inverted; writes are not.
+        ld      a,(0xFFFF)
+        cpl
+        and     0xCF
+        ld      c,a
+        ld      a,b
+        and     0x0C
+        rlca
+        rlca
+        or      c
+        ld      (0xFFFF),a
+        ret
+
+qcpz_map_source_page2:
+        ld      a,(source_position+1)
+        and     0xC0
+        rrca
+        rrca
+        rrca
+        rrca
+        rrca
+        rrca
+        ld      c,a
+        ld      a,(source_position+2)
+        add     a,a
+        add     a,a
+        add     a,c
+        ld      e,a
+        ld      d,0
+        ld      hl,RUNTIME_STAGE_TABLE
+        add     hl,de
+        ld      a,(hl)
+        call    PUT_P2_DISPATCH
+        di
+        ret
+; QCPZ_BOOTSTRAP_END
 
 qcpx_materialize_page:
         ; Select the one physical destination segment reserved for QCPX.
@@ -1966,6 +2330,62 @@ qcpx_copy_done:
         call    PUT_P1_DISPATCH
         ret
 
+; Standard forward ZX0 decoder. HL is a compressed stream in staged page 2;
+; DE is the destination in the persistent page-1 complete page.
+; QCPZ_DECODER_BEGIN
+qcpz_zx0_decoder:
+        ld      bc,0xFFFF
+        push    bc
+        inc     bc
+        ld      a,0x80
+qcpz_zx0_literals:
+        call    qcpz_zx0_elias
+        ldir
+        add     a,a
+        jr      c,qcpz_zx0_new_offset
+        call    qcpz_zx0_elias
+qcpz_zx0_copy:
+        ex      (sp),hl
+        push    hl
+        add     hl,de
+        ldir
+        pop     hl
+        ex      (sp),hl
+        add     a,a
+        jr      nc,qcpz_zx0_literals
+qcpz_zx0_new_offset:
+        pop     bc
+        ld      c,0xFE
+        call    qcpz_zx0_elias_loop
+        inc     c
+        ret     z
+        ld      b,c
+        ld      c,(hl)
+        inc     hl
+        rr      b
+        rr      c
+        push    bc
+        ld      bc,1
+        call    nc,qcpz_zx0_elias_backtrack
+        inc     bc
+        jr      qcpz_zx0_copy
+qcpz_zx0_elias:
+        inc     c
+qcpz_zx0_elias_loop:
+        add     a,a
+        jr      nz,qcpz_zx0_elias_skip
+        ld      a,(hl)
+        inc     hl
+        rla
+qcpz_zx0_elias_skip:
+        ret     c
+qcpz_zx0_elias_backtrack:
+        add     a,a
+        rl      c
+        rl      b
+        jr      qcpz_zx0_elias_loop
+; QCPZ_DECODER_END
+
 ; The complete-page Quarth image has a one-byte load image at file offset
 ; 20H and the QCPX descriptor immediately after it at 21H.  Probe that
 ; descriptor without using the normal KSSX extra-data arithmetic: QCPX is a
@@ -1990,7 +2410,13 @@ probe_qcpx:
         jr      nz,probe_qcpx_restore
         ld      a,(0x4024)
         cp      'X'
+        jr      z,probe_qcpx_found
+        cp      'Z'
         jr      nz,probe_qcpx_restore
+        ld      a,2
+        ld      (qcp_format),a
+        jr      probe_qcpx_restore
+probe_qcpx_found:
         ld      a,1
         ld      (qcp_format),a
 probe_qcpx_restore:

@@ -57,6 +57,34 @@ def target_layout(source: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def target_player_source(source: str) -> str:
+    """Remove QCPZ bootstrap-only code from the copied page-1 runtime.
+
+    QCPZ always retains and executes the C000H bootstrap materializer. The
+    alternate 52E4H assembly is copied only by legacy raw-KSS paths and has a
+    tightly bounded resident tail, so it needs only a rejecting QCPZ stub.
+    """
+    source = re.sub(
+        r"; QCPZ_BOOTSTRAP_BEGIN\n.*?; QCPZ_BOOTSTRAP_END\n",
+        "qcpz_materialize_selected:\n        jp      format_error\n",
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"; QCPZ_DECODER_BEGIN\n.*?; QCPZ_DECODER_END\n",
+        "",
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"; QCPZ_PARSE_BEGIN\n.*?; QCPZ_PARSE_END\n",
+        "qcpz_parse_sources:\n        jp      qcpx_parse_bad\n",
+        source,
+        flags=re.DOTALL,
+    )
+    return source
+
+
 def parse_labels(output: str) -> dict[str, int]:
     labels: dict[str, int] = {}
     for line in output.splitlines():
@@ -170,7 +198,7 @@ def main() -> int:
         raise ValueError("bootstrap player is unexpectedly large")
     (temp / "PLAYER_LAYOUT.inc").write_text(target_layout(layout.read_text()))
     player_copy.write_text(
-        player_source_text.replace(
+        target_player_source(player_source_text).replace(
             "copy_field:\n",
             "runtime_ready_start:\n        jp      runtime_ready_impl\n\ncopy_field:\n",
             1,

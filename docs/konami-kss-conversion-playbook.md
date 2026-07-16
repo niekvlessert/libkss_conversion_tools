@@ -279,6 +279,44 @@ The host `kssplayer` and libkss materializer support this container. The
 native MSX-DOS2 loader materializes only the selected logical page into one
 allocated physical mapper segment.
 
+For live selection, the native player retains the QCPX parser and materializer
+in its fixed page-3 TPA block. Cursor Left/Right changes the contiguous KSS ID,
+Space restarts it, and the player rebuilds the requested complete page in the
+same physical page-1 segment before calling INIT. This avoids both duplicated
+engine pages in the file and a second live mapper page. The brief stop and
+rematerialization happens only at song changes.
+
+Do not poll the keyboard through BIOS `CHSNS` or `CHGET` in this layout. Page 1
+then contains Quarth, so BIOS calls can follow slot-dependent paths that assume
+the normal system mapping. Read PPI keyboard row 8 from fixed page-3 code,
+prevent interrupts during the temporary row selection, debounce it, and save
+all engine registers around the poll. The first implementation omitted that
+register preservation and turned otherwise valid playback into noise.
+
+### Compressed complete pages (QCPZ)
+
+`tools/build_quarth_16k_complete_page_compressed.py` converts the proven QCPX
+container into QCPZ. It keeps the song maps and relocation/patch records but
+ZX0-compresses the engine, common block, and five page payloads separately.
+The current result is 16,685 bytes instead of 32,265 bytes for QCPX. Every
+compressed stream is placed wholly inside one absolute 16K file-staging
+segment, allowing a normal forward ZX0 decoder without a mapper-aware input
+callback.
+
+On MSX, engine and common data are expanded once into the writable page-1
+segment. Tracks on the same logical page need no decompression: clear
+`7D00H..7F8BH`, select the new original Quarth ID, and call INIT. When the
+logical page changes, keep engine/common intact, clear `65B5H..7FFFH`, expose
+the compressed staging segment in page 2, decode only the new payload, apply
+its descriptor patches, and restore the SCC slot before INIT.
+
+Do not use BIOS `ENASLT` to expose mapper RAM in page 2 from this fixed
+page-3 runtime. On an expanded RAM slot it can make the resident code and
+stack disappear. Select the RAM primary and secondary page-2 bits directly
+through `$A8` and `$FFFF`, preserving the page-3 fields. DOS2 `PUT_P2` then
+chooses the physical staging segment; restoring the SCC remains a separate
+slot operation.
+
 When reading the two QCPX song lookup tables, do not retain the requested song
 ID only in register C: the staged-file mapper reader uses C internally. Reload
 the requested ID before indexing the song-to-page table. Failing to do so

@@ -104,6 +104,42 @@ engine no longer performs its original `FFFDH`/`FFFEH` slot-shadow writes.
 The bootstrap SCC handoff is stored at `D2F0H/D2F1H`, outside both the
 bootstrap code and the `D300H` materialization scratch buffer.
 
+While QCPX is playing, use Cursor Left/Right to select the previous/next
+contiguous KSS song ID and Space to restart the current song. Selection wraps
+at IDs 0 and 18. A change silences the chips, rebuilds the requested complete
+page in the same allocated page-1 mapper segment, runs Quarth INIT, and resumes
+the interrupt-timed PLAY loop. This also works when the next song belongs to a
+different QCPX logical page; no second runtime mapper page is required.
+
+Keyboard polling reads PPI row 8 directly. It deliberately avoids BIOS
+`CHSNS`/`CHGET`: those calls can enter slot-dependent BIOS code while page 1
+contains Quarth rather than the normal system mapping. The poll runs with
+interrupts disabled and preserves AF, BC, DE, HL, IX, and IY, because Quarth
+retains useful register state between PLAY calls. The resident loop is at
+`D200H`, its direct PLAY wrapper is at `D250H`, and the QCPX
+parser/materializer remains resident in fixed page-3 TPA memory.
+
+The compressed `QCPZ` variant uses the same controls and complete-page
+addresses. Build it and the DOS2 player with:
+
+```sh
+python3 tools/build_quarth_16k_complete_page_compressed.py
+python3 tools/build_msx_dos2_kss.py
+```
+
+Copy `vigamup/extracted/quarth_16k_complete_page_compressed.kss` as, for
+example, `QCPZ.KSS`, then run `KSSPLAY.COM QCPZ.KSS 0`. The engine and common
+block are ZX0-expanded only at startup. A same-logical-page track change only
+clears the relocated workspace and calls INIT. A cross-page change temporarily
+replaces SCC page 2 with the staged compressed stream, expands only the new
+music payload into the existing page-1 segment, applies its pointer patches,
+then restores and enables the real SCC.
+
+The staging stream is selected with direct `$A8/$FFFF` bit masks. Calling BIOS
+`ENASLT` here can lose the fixed page-3 TPA mapping on an expanded RAM slot.
+The direct routine changes only page 2's primary/secondary bits and preserves
+page 3 exactly.
+
 The four-item interface is the target contract for adapted engines. The
 current KSSPLAY.COM test program uses fixed page-3 TPA residency and has a
 resident stop routine that restores the RST 28H vector, H.TIMI, page 1, and
