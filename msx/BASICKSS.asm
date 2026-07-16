@@ -1786,6 +1786,10 @@ qcpx_parse:
         ld      (qcp_page_data_address),hl
         call    qcpx_read_word
 
+        ld      a,(qcp_format)
+        cp      3
+        jr      nc,scpx_parse_sources
+
         ; The current Quarth builder deliberately fixes these addresses.  A
         ; mismatch is rejected instead of silently materializing a corrupt
         ; page with incorrect absolute references.
@@ -1793,15 +1797,15 @@ qcpx_parse:
         ld      de,0x65B5
         or      a
         sbc     hl,de
-        jr      nz,qcpx_parse_bad
+        jp      nz,qcpx_parse_bad
         ld      hl,(qcp_engine_size)
         ld      a,h
         cp      0x40
-        jr      nc,qcpx_parse_bad
+        jp      nc,qcpx_parse_bad
         ld      hl,(qcp_common_size)
         ld      a,h
         cp      0x40
-        jr      nc,qcpx_parse_bad
+        jp      nc,qcpx_parse_bad
 
         ld      a,(qcp_format)
         cp      2
@@ -1843,6 +1847,53 @@ qcpz_parse_sources:
         or      a
         ret
 ; QCPZ_PARSE_END
+
+; SCP_PARSE_BEGIN
+scpx_parse_sources:
+        ; SCPX/SCPZ header words are template size, payload address,
+        ; workspace address and relocation count. Salamander fixes those to
+        ; a full 16K template, payload at 4000H and workspace at 7E00H.
+        ld      hl,(qcp_engine_size)
+        ld      de,0x4000
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      hl,(qcp_common_size)
+        ld      de,0x4000
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      hl,(qcp_page_data_address)
+        ld      de,0x7E00
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      hl,0x4000
+        ld      (qcp_page_data_address),hl
+        ld      a,(qcp_format)
+        cp      4
+        jr      z,scpz_parse_sources
+        ld      hl,0x231
+        ld      (qcp_engine_source),hl
+        ld      hl,0x4231
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+
+scpz_parse_sources:
+        ld      hl,0x231
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_engine_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_engine_source),hl
+        ld      hl,0x235
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+; SCP_PARSE_END
 qcpx_parse_bad:
         scf
         ret
@@ -1934,6 +1985,10 @@ qcpx_materialize_selected:
         ld      a,(qcp_format)
         cp      2
         jp      z,qcpz_materialize_selected
+        cp      3
+        jp      z,scpx_materialize_selected
+        cp      4
+        jp      z,scpz_materialize_selected
         ; Only one physical page is required on MSX.  The selected logical
         ; record is expanded into the first allocated KSS segment; selecting
         ; another song later simply rebuilds this same segment.
@@ -2058,6 +2113,83 @@ qcpz_read_selected_descriptor:
         ld      de,0x21
         add     hl,de
         ld      (qcp_patch_source),hl
+        ret
+
+; Salamander compressed complete-page materializer. The template remains in
+; the one destination segment after startup. Since every required song has
+; its own logical page, a track change replaces only 4000H-5F7FH, clears the
+; relocated workspace and expands the selected payload at 4000H.
+scpz_materialize_selected:
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        ld      (qcp_dest_segment),a
+        call    qcpz_read_selected_descriptor
+        ld      a,(qcp_materialized_page)
+        cp      0xFF
+        jr      z,scpz_materialize_initial
+        ld      c,a
+        ld      a,(qcp_selected_page)
+        cp      c
+        jp      z,scpx_reset_workspace
+        call    scpx_clear_payload_and_workspace
+        jr      scpz_expand_payload
+
+scpz_materialize_initial:
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x4000),a
+        ld      hl,0x4000
+        ld      de,0x4001
+        ld      bc,0x3FFF
+        ldir
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        ld      bc,(qcp_engine_compressed_size)
+        ld      (qcp_data_compressed_size),bc
+        ld      de,0x4000
+        call    qcpz_decompress_source
+
+scpz_expand_payload:
+        ld      hl,(qcp_data_source)
+        call    qcpx_set_source
+        ld      de,0x4000
+        call    qcpz_decompress_source
+        ld      hl,(qcp_patch_source)
+        call    qcpx_set_source
+        call    scpx_apply_patches
+        ld      a,(qcp_selected_page)
+        ld      (qcp_materialized_page),a
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
+        ret
+
+scpx_clear_payload_and_workspace:
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x4000),a
+        ld      hl,0x4000
+        ld      de,0x4001
+        ld      bc,0x1F7F
+        ldir
+scpx_clear_workspace_mapped:
+        xor     a
+        ld      (0x7E00),a
+        ld      hl,0x7E00
+        ld      de,0x7E01
+        ld      bc,0x01EA
+        ldir
+        ret
+
+scpx_reset_workspace:
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        call    scpx_clear_workspace_mapped
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
         ret
 
 qcpz_decompress_source:
@@ -2227,6 +2359,109 @@ qcpx_record_found:
         call    qcpx_apply_patches
         or      a
         ret
+
+; SCPX_MATERIALIZER_BEGIN
+; Uncompressed Salamander record materializer. Rebuild the destination from
+; its shared 16K template and the selected variable-size payload.
+scpx_materialize_selected:
+        ld      a,(qcp_selected_page)
+        ld      (qcp_page_index),a
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        ld      (qcp_dest_segment),a
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        xor     a
+        ld      (qcp_dest_offset),a
+        ld      (qcp_dest_offset+1),a
+        ld      bc,0x4000
+        call    qcpx_copy_range
+
+        ld      hl,(qcp_records_source)
+        ld      (qcp_cursor),hl
+scpx_record_scan:
+        ld      hl,(qcp_cursor)
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_data_size),hl
+        call    qcpx_read_word
+        ld      (qcp_patch_count),hl
+        ld      a,(qcp_page_index)
+        or      a
+        jr      z,scpx_record_found
+        ld      hl,(qcp_patch_count)
+        add     hl,hl
+        add     hl,hl
+        ld      de,4
+        add     hl,de
+        ld      de,(qcp_data_size)
+        add     hl,de
+        ld      de,(qcp_cursor)
+        add     hl,de
+        ld      (qcp_cursor),hl
+        ld      a,(qcp_page_index)
+        dec     a
+        ld      (qcp_page_index),a
+        jr      scpx_record_scan
+
+scpx_record_found:
+        ld      hl,(qcp_cursor)
+        ld      de,4
+        add     hl,de
+        ld      de,(qcp_patch_count)
+        ex      de,hl
+        add     hl,hl
+        add     hl,hl
+        ex      de,hl
+        add     hl,de
+        call    qcpx_set_source
+        xor     a
+        ld      (qcp_dest_offset),a
+        ld      (qcp_dest_offset+1),a
+        ld      bc,(qcp_data_size)
+        call    qcpx_copy_range
+        ld      hl,(qcp_cursor)
+        ld      de,4
+        add     hl,de
+        call    qcpx_set_source
+        call    scpx_apply_patches
+        ld      a,(qcp_selected_page)
+        ld      (qcp_materialized_page),a
+        or      a
+        ret
+
+; SCPX patch offsets are absolute within page 1, unlike QCPX offsets which
+; are relative to Quarth's common-data blob.
+scpx_apply_patches:
+        ld      hl,(qcp_patch_count)
+        ld      (qcp_patch_left),hl
+scpx_patch_loop:
+        ld      hl,(qcp_patch_left)
+        ld      a,h
+        or      l
+        jr      z,scpx_patch_done
+        call    qcpx_read_word
+        ld      (qcp_patch_offset),hl
+        call    qcpx_read_word
+        ld      (qcp_patch_value),hl
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        ld      hl,(qcp_patch_offset)
+        ld      de,0x4000
+        add     hl,de
+        ld      de,(qcp_patch_value)
+        ld      (hl),e
+        inc     hl
+        ld      (hl),d
+        ld      hl,(qcp_patch_left)
+        dec     hl
+        ld      (qcp_patch_left),hl
+        jr      scpx_patch_loop
+scpx_patch_done:
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        ret
+; SCPX_MATERIALIZER_END
 
 qcpx_apply_patches:
         ld      hl,(qcp_patch_count)
@@ -2401,7 +2636,14 @@ probe_qcpx:
         call    PUT_P1_DISPATCH
         ld      a,(0x4021)
         cp      'Q'
+        jr      z,probe_qcpx_prefix_q
+        cp      'S'
         jr      nz,probe_qcpx_restore
+        ld      b,3
+        jr      probe_qcpx_prefix_ok
+probe_qcpx_prefix_q:
+        ld      b,1
+probe_qcpx_prefix_ok:
         ld      a,(0x4022)
         cp      'C'
         jr      nz,probe_qcpx_restore
@@ -2413,11 +2655,12 @@ probe_qcpx:
         jr      z,probe_qcpx_found
         cp      'Z'
         jr      nz,probe_qcpx_restore
-        ld      a,2
+        ld      a,b
+        inc     a
         ld      (qcp_format),a
         jr      probe_qcpx_restore
 probe_qcpx_found:
-        ld      a,1
+        ld      a,b
         ld      (qcp_format),a
 probe_qcpx_restore:
         ld      a,(RUNTIME_BASIC_P1)

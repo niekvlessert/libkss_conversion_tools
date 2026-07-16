@@ -101,8 +101,9 @@ work area together in mapper-RAM page 1. Page 2 remains selected to the real
 SCC cartridge for INIT and PLAY. The player selects the configured SCC slot
 and enables the register window with a `3FH` write to `9000H`; the adapted
 engine no longer performs its original `FFFDH`/`FFFEH` slot-shadow writes.
-The bootstrap SCC handoff is stored at `D2F0H/D2F1H`, outside both the
-bootstrap code and the `D300H` materialization scratch buffer.
+The bootstrap code ends below `D300H`; `D300H..D6FFH` is the materialization
+scratch buffer, fixed mapper/slot helpers start at `D700H`, and the SCC
+handoff is stored at `D8F0H/D8F1H`.
 
 While QCPX is playing, use Cursor Left/Right to select the previous/next
 contiguous KSS song ID and Space to restart the current song. Selection wraps
@@ -116,7 +117,7 @@ Keyboard polling reads PPI row 8 directly. It deliberately avoids BIOS
 contains Quarth rather than the normal system mapping. The poll runs with
 interrupts disabled and preserves AF, BC, DE, HL, IX, and IY, because Quarth
 retains useful register state between PLAY calls. The resident loop is at
-`D200H`, its direct PLAY wrapper is at `D250H`, and the QCPX
+`D820H`, its direct PLAY wrapper is at `D850H`, and the complete-page
 parser/materializer remains resident in fixed page-3 TPA memory.
 
 The compressed `QCPZ` variant uses the same controls and complete-page
@@ -139,6 +140,31 @@ The staging stream is selected with direct `$A8/$FFFF` bit masks. Calling BIOS
 `ENASLT` here can lose the fixed page-3 TPA mapping on an expanded RAM slot.
 The direct routine changes only page 2's primary/secondary bits and preserves
 page 3 exactly.
+
+### Salamander SCPX/SCPZ
+
+Build and stage both Salamander complete-page variants with:
+
+```sh
+python3 tools/build_salamander_complete_page.py
+python3 tools/build_salamander_complete_page_compressed.py
+python3 tools/build_msx_dos2_kss.py
+cp vigamup/extracted/salamander_complete_page.kss msx/SCPX.KSS
+cp vigamup/extracted/salamander_complete_page_compressed.kss msx/SCPZ.KSS
+```
+
+Then start contiguous track 5 (original Salamander ID 30) with:
+
+```text
+KSSPLAY.COM SCPZ.KSS 5
+```
+
+Cursor Left/Right changes tracks, Space restarts the current track. Salamander
+uses the same physical layout as QCPX/QCPZ: engine plus selected music in one
+writable page-1 segment, real SCC in page 2, and fixed player/DOS2 state in
+page 3. Its original direct BIOS `WRTPSG` calls at `0093H` are replaced by a
+resident direct-port gateway because DOS2 page 0 is not guaranteed to expose
+the BIOS slot.
 
 The four-item interface is the target contract for adapted engines. The
 current KSSPLAY.COM test program uses fixed page-3 TPA residency and has a

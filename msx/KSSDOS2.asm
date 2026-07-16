@@ -619,7 +619,10 @@ probe_qcpx_header:
         ret     nz
         ld      a,(header+0x21)
         cp      'Q'
+        jr      z,probe_qcpx_header_prefix_ok
+        cp      'S'
         ret     nz
+probe_qcpx_header_prefix_ok:
         ld      a,(header+0x22)
         cp      'C'
         ret     nz

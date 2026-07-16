@@ -31,6 +31,16 @@ INTERNAL_LAYOUTS = {
         "expected_init_address": 0xB817,
         "expected_play_address": 0xB820,
     },
+    "salamander": {
+        "engine_segments": ((0x6000, 0x73C8), (0xC000, 0xC047)),
+        "track_segments": ((0x73C8, 0xC000),),
+        "track_table_address": 0x663E,
+        "track_stream_address": 0x73C8,
+        "expected_load_address": 0x6000,
+        "expected_load_size": 0x6047,
+        "expected_init_address": 0xC017,
+        "expected_play_address": 0xC043,
+    },
 }
 
 

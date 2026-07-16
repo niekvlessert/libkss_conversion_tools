@@ -269,11 +269,13 @@ removed because the native player owns slot selection and keeps page 2 on the
 SCC for INIT and PLAY.
 
 The temporary DOS2 bootstrap now extends beyond `CC9FH`. Handoff bytes and
-fixed helper destinations must not overlap that code. The SCC slot/magic
-handoff therefore lives at `D2F0H/D2F1H`, above the fixed runtime helpers and
-below the `D300H` QCPX scratch buffer. Its former `CC9FH` location overwrote
-an instruction operand and the next opcode during common-data materialization,
-which restarted the COM entry after the first handoff.
+fixed helper destinations must not overlap that code. The current bootstrap
+ends below `D300H`, the transfer scratch buffer occupies `D300H..D6FFH`, the
+mapper/slot dispatches begin at `D700H`, the live return loop and PLAY wrapper
+are at `D820H` and `D850H`, and the SCC slot/magic handoff is at
+`D8F0H/D8F1H`. Its former `CC9FH` location overwrote an instruction operand
+and the next opcode during common-data materialization, which restarted the
+COM entry after the first handoff.
 
 The host `kssplayer` and libkss materializer support this container. The
 native MSX-DOS2 loader materializes only the selected logical page into one
@@ -338,6 +340,57 @@ The complete-page INIT wrapper must preserve AF around the reset call at
 Quarth song ID in A. Without `PUSH AF`/`POP AF`, every request selected song 7;
 on pages not containing song 7 this degraded into invalid pointers and
 hanging or single-channel output.
+
+## Salamander complete-page conversion
+
+Salamander starts as one `6000H..C046H` KSCC load image. The useful fixed
+engine is `6000H..73C7H`, with the original KSS wrappers at `C000H..C046H`;
+music resources occupy `73C8H..BFFFH`. Runtime state originally at
+`E000H..E1EAH` is relocated to `7E00H..7FEAH`.
+
+`tools/build_salamander_complete_page.py` builds the private uncompressed
+`SCPX` container. It relocates the wrapper to `5F80H`, exposes INIT at
+`5F97H` and PLAY at `5FC3H`, and creates one logical page for each required
+track in `vigamup/salamander.trackinfo`:
+
+```text
+new IDs 0..13 -> original IDs 24,26,27,28,29,30,31,32,33,38,39,40,41,42
+page 1 4000H..5F7FH  selected relocated music payload
+page 1 5F80H..5FFFH  wrappers and direct PSG gateway
+page 1 6000H..74AFH  engine, descriptors and common event data
+page 1 7E00H..7FEAH  writable engine state
+page 2                 real SCC cartridge slot
+```
+
+The per-song streams are relocated independently. Stream commands `F9H` and
+`FDH` carry a word at `+1`; `FBH` and `FCH` carry a count byte followed by a
+word at `+2`. Descriptor words are stored as absolute offsets within the
+materialized page and therefore need a different patch routine from Quarth's
+common-block-relative patches.
+
+`tools/build_salamander_complete_page_compressed.py` converts SCPX to `SCPZ`.
+It stores the sparse 16K template once and ZX0-compresses each track payload
+separately. The current files are 31,958 bytes for SCPX and 13,469 bytes for
+SCPZ. On a track change the DOS2 player preserves the engine, clears
+`4000H..5F7FH` plus `7E00H..7FEAH`, decodes the selected payload, reapplies
+its absolute pointer patches, restores the SCC slot, and calls INIT.
+
+A crucial DOS2 portability rule came from this engine: direct BIOS addresses
+are not safe merely because page 0 is left unchanged. Under DOS2, page 0 can
+be DOS/RAM rather than the BIOS slot. Salamander called/jumped directly to
+BIOS `WRTPSG` at `0093H`; on the native player this returned to COM entry
+`0100H`, repeatedly printing the loader phases and never reaching PLAY. The
+builder now redirects all ten `0093H` references to a page-1-resident gateway
+at `5FC7H` that writes ports `A0H/A1H` directly. For future packs, classify
+all calls below `0100H` as slot-sensitive dependencies and replace them with
+resident gateways or correct interslot calls.
+
+Host libkss materializes both SCPX and SCPZ into ordinary writable 16K banks.
+The native DOS2 player materializes only the selected logical page into one
+allocated physical segment. Track 5 (original ID 30, “Burn the Wind”) is the
+main regression case; all 14 contiguous host IDs pass playback startup, and
+the compressed native track-5 test reaches INIT once, continues through PLAY,
+and produces PSG/SCC audio.
 
 ## Engine/player mapping contract
 
@@ -410,7 +463,8 @@ Use this order for a new Konami pack:
    can make this take minutes; use a shorter trace harness during iteration.
 5. Disassemble the executable portion with `z80dasm`. Find direct absolute
    references, then inspect the targets: a table target often contains a
-   second layer of pointers.
+   second layer of pointers. Also inventory calls below `0100H`: direct BIOS
+   entry addresses may work in libkss but fail under DOS2 slot/page-0 layout.
 6. Build a per-game layout manifest containing the original header, engine
    segments, common tables, stream ranges, bank groups, and patch sites. Keep
    the manifest separate from the generic packer.

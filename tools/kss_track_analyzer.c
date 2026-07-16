@@ -23,6 +23,7 @@ typedef struct {
 
 typedef struct {
   KSS *kss;
+  KSSPLAY *player;
   int current_page4;
   int current_page5;
   int page4[MAX_COMBINATIONS];
@@ -30,6 +31,9 @@ typedef struct {
   int combination_count;
   int bank16[MAX_COMBINATIONS];
   int bank16_count;
+  unsigned char music_reads[0x10000];
+  unsigned long scc_writes;
+  unsigned long psg_writes;
 } TRACE;
 
 static char *trim(char *text) {
@@ -71,6 +75,7 @@ static void add_16k_bank(TRACE *trace, int bank) {
 
 static void memory_write(void *context, uint32_t address, uint32_t value) {
   TRACE *trace = (TRACE *)context;
+  if (0x9800 <= address && address <= 0x98ff) trace->scc_writes++;
   if (!trace->kss || trace->kss->bank_mode != KSS_8K) return;
   if (address == 0x9000) {
     trace->current_page4 = (int)value;
@@ -83,9 +88,40 @@ static void memory_write(void *context, uint32_t address, uint32_t value) {
 
 static void io_write(void *context, uint32_t address, uint32_t value) {
   TRACE *trace = (TRACE *)context;
+  if ((address & 0xff) == 0xa0 || (address & 0xff) == 0xa1)
+    trace->psg_writes++;
   if (trace->kss && trace->kss->bank_mode == KSS_16K &&
       (address & 0xff) == 0xfe)
     add_16k_bank(trace, (int)value);
+}
+
+static void memory_read(void *context, uint32_t address, uint32_t value) {
+  TRACE *trace = (TRACE *)context;
+  uint32_t pc;
+  (void)value;
+  if (!trace->player || address < 0x73c8 || address >= 0xc000)
+    return;
+  pc = trace->player->vm->context.t_pc & 0xffff;
+  if ((0x6472 <= pc && pc < 0x73c8) || (0xc000 <= pc && pc < 0xc047))
+    trace->music_reads[address] = 1;
+}
+
+static void print_music_read_ranges(FILE *out, const TRACE *trace) {
+  uint32_t address = 0x73c8;
+  int first = 1;
+  fprintf(out, "music_read_ranges=");
+  while (address < 0xc000) {
+    uint32_t start, end;
+    while (address < 0xc000 && !trace->music_reads[address]) address++;
+    if (address == 0xc000) break;
+    start = address++;
+    while (address < 0xc000 && trace->music_reads[address]) address++;
+    end = address;
+    fprintf(out, "%s%04X-%04X", first ? "" : ",", start, end);
+    first = 0;
+  }
+  if (first) fprintf(out, "none");
+  fputc('\n', out);
 }
 
 static void seed_current_banks(TRACE *trace, KSSPLAY *player) {
@@ -208,8 +244,10 @@ static int analyze_one(const char *directory, const char *stem,
     }
     memset(&trace, 0, sizeof(trace));
     trace.kss = kss;
+    trace.player = player;
     KSSPLAY_set_data(player, kss);
     KSSPLAY_set_memwrite_handler(player, &trace, memory_write);
+    KSSPLAY_set_memread_handler(player, &trace, memory_read);
     KSSPLAY_set_iowrite_handler(player, &trace, io_write);
     KSSPLAY_reset(player, (uint32_t)tracks[i].id, 0);
     seed_current_banks(&trace, player);
@@ -252,6 +290,9 @@ static int analyze_one(const char *directory, const char *stem,
       if (!trace.bank16_count) fprintf(out, "none");
       fputc('\n', out);
     }
+    print_music_read_ranges(out, &trace);
+    fprintf(out, "scc_writes=%lu\npsg_writes=%lu\n",
+            trace.scc_writes, trace.psg_writes);
     fputc('\n', out);
     KSSPLAY_delete(player);
   }

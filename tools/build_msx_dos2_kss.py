@@ -38,7 +38,7 @@ TARGET_VALUES = {
     "SLOT_FFFF_SAVED": "0x622A",
     "HTIMI_SAVED": "0x622C",
     "HTIMI_INSTALLED": "0x6231",
-    "RUNTIME_MARKER": "0x6232",
+    "RUNTIME_MARKER": "0x6240",
 }
 
 
@@ -66,7 +66,9 @@ def target_player_source(source: str) -> str:
     """
     source = re.sub(
         r"; QCPZ_BOOTSTRAP_BEGIN\n.*?; QCPZ_BOOTSTRAP_END\n",
-        "qcpz_materialize_selected:\n        jp      format_error\n",
+        "qcpz_materialize_selected:\n"
+        "scpz_materialize_selected:\n"
+        "        jp      format_error\n",
         source,
         flags=re.DOTALL,
     )
@@ -79,6 +81,22 @@ def target_player_source(source: str) -> str:
     source = re.sub(
         r"; QCPZ_PARSE_BEGIN\n.*?; QCPZ_PARSE_END\n",
         "qcpz_parse_sources:\n        jp      qcpx_parse_bad\n",
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"; SCP_PARSE_BEGIN\n.*?; SCP_PARSE_END\n",
+        "scpx_parse_sources:\n"
+        "scpz_parse_sources:\n"
+        "        jp      qcpx_parse_bad\n",
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"; SCPX_MATERIALIZER_BEGIN\n.*?; SCPX_MATERIALIZER_END\n",
+        "scpx_materialize_selected:\n"
+        "scpx_apply_patches:\n"
+        "        jp      format_error\n",
         source,
         flags=re.DOTALL,
     )
