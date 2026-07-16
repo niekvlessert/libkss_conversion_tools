@@ -270,10 +270,10 @@ SCC for INIT and PLAY.
 
 The temporary DOS2 bootstrap now extends beyond `CC9FH`. Handoff bytes and
 fixed helper destinations must not overlap that code. The current bootstrap
-ends below `D300H`, the transfer scratch buffer occupies `D300H..D6FFH`, the
-mapper/slot dispatches begin at `D700H`, the live return loop and PLAY wrapper
-are at `D820H` and `D850H`, and the SCC slot/magic handoff is at
-`D8F0H/D8F1H`. Its former `CC9FH` location overwrote an instruction operand
+ends below `D400H`, the transfer scratch buffer occupies `D400H..D7FFH`, the
+mapper/slot dispatches begin at `D800H`, the live return loop and PLAY wrapper
+are at `D920H` and `D950H`, and the SCC slot/magic handoff is at
+`D9F0H/D9F1H`. Its former `CC9FH` location overwrote an instruction operand
 and the next opcode during common-data materialization, which restarted the
 COM entry after the first handoff.
 
@@ -283,7 +283,10 @@ allocated physical mapper segment.
 
 For live selection, the native player retains the QCPX parser and materializer
 in its fixed page-3 TPA block. Cursor Left/Right changes the contiguous KSS ID,
-Space restarts it, and the player rebuilds the requested complete page in the
+Space restarts it, and Escape or Ctrl-C exits to DOS2. The exit path silences
+PSG/SCC, reselects mapper RAM in page 2, restores the original page-1/page-2
+segments and slot layout, and terminates through DOS2 so process-owned mapper
+segments are reclaimed. The player rebuilds the requested complete page in the
 same physical page-1 segment before calling INIT. This avoids both duplicated
 engine pages in the file and a second live mapper page. The brief stop and
 rematerialization happens only at song changes.

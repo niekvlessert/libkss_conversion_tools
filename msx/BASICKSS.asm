@@ -1664,11 +1664,39 @@ qcpx_return_halt:
 qcpx_return_stub_end:
 
 qcpx_poll_keyboard:
-        ; Poll keyboard row 8 directly through the PPI. BIOS keyboard calls
-        ; can invoke slot-dependent code while page 1 contains QCPX RAM.
-        ; Row 8: bit 0=Right, bit 3=Left, bit 7=Space (active low).
+        ; Poll the keyboard directly through the PPI. BIOS keyboard calls can
+        ; invoke slot-dependent code while page 1 contains complete-page RAM.
+        ; Escape is row 7 bit 2. Ctrl-C is row 6 bit 1 plus row 3 bit 0.
+        ; Row 8 contains Right bit 0, Left bit 3 and Space bit 7.
         in      a,(0xAA)
-        ld      c,a
+        ld      e,a
+        and     0xF0
+        or      7
+        out     (0xAA),a
+        in      a,(0xA9)
+        cpl
+        bit     2,a
+        jr      nz,qcpx_exit_key
+
+        ld      a,e
+        and     0xF0
+        or      6
+        out     (0xAA),a
+        in      a,(0xA9)
+        cpl
+        bit     1,a
+        jr      z,qcpx_poll_row8
+        ld      a,e
+        and     0xF0
+        or      3
+        out     (0xAA),a
+        in      a,(0xA9)
+        cpl
+        bit     0,a
+        jr      nz,qcpx_exit_key
+
+qcpx_poll_row8:
+        ld      a,e
         and     0xF0
         or      8
         out     (0xAA),a
@@ -1676,7 +1704,7 @@ qcpx_poll_keyboard:
         cpl
         and     0x89
         ld      b,a
-        ld      a,c
+        ld      a,e
         out     (0xAA),a
         ld      a,b
         or      a
@@ -1684,6 +1712,10 @@ qcpx_poll_keyboard:
         xor     a
         ld      (qcp_key_latch),a
         ret
+qcpx_exit_key:
+        ld      a,e
+        out     (0xAA),a
+        jp      qcpx_exit_to_dos
 qcpx_key_pressed:
         ld      c,a
         ld      a,(qcp_key_latch)
@@ -1699,6 +1731,20 @@ qcpx_key_pressed:
         ret     z
         ld      a,(qcp_current_song)
         jp      qcpx_switch_song
+
+; Return from the complete-page player to COMMAND2.COM. Page 2 currently
+; exposes the SCC cartridge, so first select mapper RAM there, then restore
+; all mapper/vector state owned by the runtime. DOS2 TERM0 reclaims mapper
+; segments allocated by this process.
+qcpx_exit_to_dos:
+        di
+        call    qcpx_silence
+        call    qcpz_select_ram_page2
+        call    stop_runtime
+        ld      sp,(RUNTIME_STACK_TOP)
+        ei
+        ld      bc,0
+        jp      0x0005
 
 qcpx_next_song:
         ld      a,(qcp_current_song)

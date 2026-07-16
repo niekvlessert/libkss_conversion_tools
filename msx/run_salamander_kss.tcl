@@ -18,8 +18,8 @@ after realtime 28 {
 after realtime 30 {
     soundlog start [file join $test_dir salamander-track5-msx.wav]
 }
-after realtime 36 {keymatrixdown 8 0}
-after realtime 37 {keymatrixup 8 0}
+after realtime 36 {keymatrixdown 8 0x01}
+after realtime 37 {keymatrixup 8 0x01}
 after realtime 50 {
     soundlog stop
     set state [open [file join $test_dir salamander-track5-msx-state.txt] w]

@@ -10,10 +10,10 @@ set SCC_volume 100
 after realtime 12 {type "KSSPLAY.COM QCPZ.KSS 0"}
 after realtime 15 {type "\r"}
 after realtime 20 {soundlog start [file join $test_dir quarth-two-switches.wav]}
-after realtime 26 {keymatrixdown 8 0}
-after realtime 27 {keymatrixup 8 0}
-after realtime 32 {keymatrixdown 8 0}
-after realtime 33 {keymatrixup 8 0}
+after realtime 26 {keymatrixdown 8 0x01}
+after realtime 27 {keymatrixup 8 0x01}
+after realtime 32 {keymatrixdown 8 0x01}
+after realtime 33 {keymatrixup 8 0x01}
 after realtime 40 {
     soundlog stop
     set state [open [file join $test_dir quarth-two-switches-state.txt] w]

@@ -101,12 +101,13 @@ work area together in mapper-RAM page 1. Page 2 remains selected to the real
 SCC cartridge for INIT and PLAY. The player selects the configured SCC slot
 and enables the register window with a `3FH` write to `9000H`; the adapted
 engine no longer performs its original `FFFDH`/`FFFEH` slot-shadow writes.
-The bootstrap code ends below `D300H`; `D300H..D6FFH` is the materialization
-scratch buffer, fixed mapper/slot helpers start at `D700H`, and the SCC
-handoff is stored at `D8F0H/D8F1H`.
+The bootstrap code ends below `D400H`; `D400H..D7FFH` is the materialization
+scratch buffer, fixed mapper/slot helpers start at `D800H`, and the SCC
+handoff is stored at `D9F0H/D9F1H`.
 
 While QCPX is playing, use Cursor Left/Right to select the previous/next
-contiguous KSS song ID and Space to restart the current song. Selection wraps
+contiguous KSS song ID, Space to restart, and Escape or Ctrl-C to return to
+DOS2. Selection wraps
 at IDs 0 and 18. A change silences the chips, rebuilds the requested complete
 page in the same allocated page-1 mapper segment, runs Quarth INIT, and resumes
 the interrupt-timed PLAY loop. This also works when the next song belongs to a
@@ -117,7 +118,7 @@ Keyboard polling reads PPI row 8 directly. It deliberately avoids BIOS
 contains Quarth rather than the normal system mapping. The poll runs with
 interrupts disabled and preserves AF, BC, DE, HL, IX, and IY, because Quarth
 retains useful register state between PLAY calls. The resident loop is at
-`D820H`, its direct PLAY wrapper is at `D850H`, and the complete-page
+`D920H`, its direct PLAY wrapper is at `D950H`, and the complete-page
 parser/materializer remains resident in fixed page-3 TPA memory.
 
 The compressed `QCPZ` variant uses the same controls and complete-page
@@ -159,7 +160,8 @@ Then start contiguous track 5 (original Salamander ID 30) with:
 KSSPLAY.COM SCPZ.KSS 5
 ```
 
-Cursor Left/Right changes tracks, Space restarts the current track. Salamander
+Cursor Left/Right changes tracks, Space restarts the current track, and Escape
+or Ctrl-C returns to COMMAND2.COM. Salamander
 uses the same physical layout as QCPX/QCPZ: engine plus selected music in one
 writable page-1 segment, real SCC in page 2, and fixed player/DOS2 state in
 page 3. Its original direct BIOS `WRTPSG` calls at `0093H` are replaced by a
@@ -167,8 +169,7 @@ resident direct-port gateway because DOS2 page 0 is not guaranteed to expose
 the BIOS slot.
 
 The four-item interface is the target contract for adapted engines. The
-current KSSPLAY.COM test program uses fixed page-3 TPA residency and has a
-resident stop routine that restores the RST 28H vector, H.TIMI, page 1, and
-the original page-2 segment. A user-facing STOP/free-segments/DOS-return path
-still needs to call that routine before treating it as a finished DOS2
-application.
+current KSSPLAY.COM uses fixed page-3 TPA residency. For complete-page files,
+Escape/Ctrl-C silences the chips, restores mapper RAM and the original page-1
+and page-2 segments, restores any owned vectors, and terminates through DOS2.
+DOS2 then reclaims the mapper segments allocated by the process.

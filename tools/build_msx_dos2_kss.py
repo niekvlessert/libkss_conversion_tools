@@ -38,7 +38,7 @@ TARGET_VALUES = {
     "SLOT_FFFF_SAVED": "0x622A",
     "HTIMI_SAVED": "0x622C",
     "HTIMI_INSTALLED": "0x6231",
-    "RUNTIME_MARKER": "0x6240",
+    "RUNTIME_MARKER": "0x6290",
 }
 
 
@@ -68,6 +68,7 @@ def target_player_source(source: str) -> str:
         r"; QCPZ_BOOTSTRAP_BEGIN\n.*?; QCPZ_BOOTSTRAP_END\n",
         "qcpz_materialize_selected:\n"
         "scpz_materialize_selected:\n"
+        "qcpz_select_ram_page2:\n"
         "        jp      format_error\n",
         source,
         flags=re.DOTALL,
