@@ -53,6 +53,8 @@ typedef struct {
   int loops;
   int quality;
   int info_only;
+  int mapper_base;
+  int mapper_base_set;
   const char *opl4_rom;
   const char *mwk_path;
 } Options;
@@ -238,6 +240,7 @@ static void usage(FILE *stream, const char *program) {
           "  -rN, --rate N       Requested sample rate (default: 44100)\n"
           "  -nN, --channels N   1 or 2 output channels (default: 1)\n"
           "  -qN, --quality N    0=low, 1=high (default: 1)\n"
+          "  --mapper-base N    Map bank 0 to physical mapper segment N\n"
           "  --opl4-rom FILE     Use this YRW801 ROM for MoonSound\n"
           "  --mwk FILE          Override the embedded/external MWK samplepack\n"
           "                      (KSP files use their embedded MWK by default)\n"
@@ -406,6 +409,23 @@ static int parse_options(int argc, char **argv, Options *options) {
         return 0;
       }
       options->mwk_path = argv[i];
+      continue;
+    }
+    if (strcmp(argument, "--mapper-base") == 0) {
+      if (++i >= argc || !parse_integer(argv[i], 0, 255,
+                                        &options->mapper_base)) {
+        fprintf(stderr, "error: --mapper-base needs a value from 0 to 255\n");
+        return 0;
+      }
+      options->mapper_base_set = 1;
+      continue;
+    }
+    if (strncmp(argument, "--mapper-base=", 14) == 0) {
+      if (!parse_integer(argument + 14, 0, 255, &options->mapper_base)) {
+        fprintf(stderr, "error: --mapper-base needs a value from 0 to 255\n");
+        return 0;
+      }
+      options->mapper_base_set = 1;
       continue;
     }
     if (strncmp(argument, "--mwk=", 6) == 0) {
@@ -706,6 +726,8 @@ static int play_audio(const Options *options, KSS *kss,
     fprintf(stderr, "error: could not attach KSS data\n");
     goto cleanup;
   }
+  if (options->mapper_base_set)
+    KSSPLAY_set_mapper_base(state.player, (uint32_t)options->mapper_base);
   KSSPLAY_reset(state.player, (uint32_t)options->song, 0);
   KSSPLAY_set_device_quality(state.player, KSS_DEVICE_PSG,
                              (uint32_t)options->quality);

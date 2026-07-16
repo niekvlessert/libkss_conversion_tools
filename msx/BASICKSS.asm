@@ -10,62 +10,30 @@
 ;   page 1 (4000H) = bank 10
 ;   page 2 (8000H) = bank 9
 ;   page 3 (C000H) = bank 8
-; KSS 16K bank data remains at the bank numbers declared by the file.  The
-; player is copied to bank 7 before it starts materializing the file.
+; KSS bank data is materialized in dynamically allocated segments.  The
+; runtime logical-to-physical table translates engine bank requests before
+; page 2 is switched, so the engine never depends on these segment numbers.
+; The bootstrap is assembled at C000H.  For the DOS2 Quarth path the build
+; assembles the same source a second time at 52E4H; after materialization the
+; bootstrap copies that page-1 runtime over the free tail of the Quarth image.
 
-        org     0xC000
-
-BIOS_ENASLT:    equ     0x0024
-BIOS_CHPUT:     equ     0x00A2
-BIOS_RAMAD1:    equ     0xF342
-H_TIMI:         equ     0xFD9F
-
-MAPPER_PAGE1:   equ     0xFD
-MAPPER_PAGE2:   equ     0xFE
-MAPPER_PAGE3:   equ     0xFF
-SCC_SLOT:       equ     0x82    ; openMSX -extb scc, slot B, secondary 0
-
-; These values are filled by the MSX-DOS2 loader before the player starts.
-RUNTIME_CONFIG:       equ 0xDFE0
-RUNTIME_PLAYER_BANK:  equ RUNTIME_CONFIG
-RUNTIME_STAGE_TABLE:  equ RUNTIME_CONFIG+1
-RUNTIME_MAIN_TABLE:   equ RUNTIME_STAGE_TABLE+32
-RUNTIME_BASIC_P1:     equ RUNTIME_MAIN_TABLE+4
-RUNTIME_BASIC_P2:     equ RUNTIME_BASIC_P1+1
-RUNTIME_KSS_TABLE:    equ RUNTIME_BASIC_P2+1
-RUNTIME_PAGE2_RESTORE: equ RUNTIME_KSS_TABLE+32
-RUNTIME_CONFIG_END:   equ RUNTIME_PAGE2_RESTORE+1
-STAGE_BANK:           equ 12
-
-; These bytes are outside the BASIC program and are retained while the
-; helper temporarily changes the page-2 mapper segment.
-BASIC_PTR:      equ     0x7FF0
-BASIC_SIZE:     equ     0x7FF3       ; 24-bit little-endian file size
-BASIC_STATE:    equ     0x7FF6
-BASIC_SONG:     equ     0x7FF7
-FIELD_SCRATCH:  equ     0xC800
-
-STACK_TOP:      equ     0xF380
-RETURN_STUB:    equ     0xF380
-INIT_SONG_SAVED: equ    0xF374
-INIT_TARGET:    equ     0xF376
-PLAY_WRAPPER:   equ     0xF3A0
-PLAY_TARGET:    equ     0xF37A
-KSS_TABLE_SAVED: equ    0xF300
-SCC_SHADOW:     equ     0xF200
-SCC_PLUS_SHADOW: equ    0xF100
-KSS_STORAGE_SAVED: equ  0xF37C
-RAM_SLOT_SAVED: equ     0xF37D
-PAGE2_RESTORE_SAVED: equ 0xF37E
-PAGE1_RESTORE_SAVED: equ 0xF37F
-BANK0_HANDLER:  equ     0xF500
-BANK1_HANDLER:  equ     0xF5C0
-CUSTOM_ENASLT:  equ     0xF680
+        include 'PLAYER_LAYOUT.inc'
 
 start:
-        ld      a,(BASIC_STATE)
-        jp      nz,start_player
-        jp      copy_field
+        di
+        ; The DOS2 front-end already queried EXTBIO and stored PUT_P0/P1/P2
+        ; in the handoff block. Do not re-enter EXTBIO after taking over the
+        ; fixed page-3 TPA; some DOS2 builds remap that page during EXTBIO.
+        ; The DOS2 loader already captured a safe TPA stack top. Do not
+        ; reread 0006H after ALL_SEG/BDOS activity; some DOS2 setups change
+        ; that word while the loader is handing control over.
+        defs    6,0
+        call    install_dispatches
+        ; KSSPLAY.COM always supplies the DOS2 mapper-call handoff. Keep the
+        ; original nine-byte footprint so the page-1 runtime entry remains at
+        ; the fixed address used by the bootstrap.
+        jp      start_player
+        defs    6,0
 
 ; Called by BASICKSS.BAS after each GET #1.  The argument written by BASIC
 ; is VARPTR(B$), i.e. a three-byte string descriptor.  Its word at +1/+2 is
@@ -92,7 +60,7 @@ copy_field:
 copy_field_part:
         ld      bc,(field_remaining)
         ld      a,(stage_bank)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ld      hl,(stage_offset)
         ld      a,h
         and     0x3F
@@ -147,7 +115,7 @@ copy_field_no_bank_wrap:
 copy_field_part_done:
         ld      (stage_offset),hl
         ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ei
         xor     a
         ret
@@ -155,21 +123,7 @@ copy_field_part_done:
 ; Entry used for USR(0) after the file has been staged.
 start_player:
         di
-        call    map_ram_pages
-
-        ; Move the player off the BASIC page-3 bank.  The KSS image is then
-        ; free to overwrite every normal RAM address, including C000H.
-        ld      a,(RUNTIME_PLAYER_BANK)
-        out     (MAPPER_PAGE2),a
-        ld      hl,0xC000
-        ld      de,0x8000
-        ld      bc,player_end-start
-        ldir
-        ld      a,(RUNTIME_PLAYER_BANK)
-        out     (MAPPER_PAGE3),a
-        jp      player_relocated
-
-player_relocated:
+        ld      sp,(RUNTIME_STACK_TOP)
         ; Capture BASIC-owned values before page 1 is reused as the source
         ; window for the staged file.
         ld      hl,(BASIC_SIZE)
@@ -181,8 +135,19 @@ player_relocated:
 
         call    read_header
         jr      c,format_error
-        call    validate_bank_range
-        jr      c,unsupported_bank
+        ; QCPX is the complete-page Quarth format.  Its materializer uses
+        ; only page 1 as a temporary source/destination window; page 0 and
+        ; page 3 remain in their DOS2 mappings and page 2 is reserved for
+        ; the real SCC slot.  The legacy path retains the older RAM layout.
+        ld      a,(qcp_format)
+        or      a
+        jp      nz,qcpx_runtime_path
+
+        call    map_ram_pages
+        ; The bootstrap is temporary.  Quarth's page-3 channel work areas
+        ; must remain untouched once the page-1 runtime takes over.
+
+player_relocated:
         call    check_file_size
         jr      c,file_error
 
@@ -204,21 +169,22 @@ copy_8k_banks_path:
         jr      c,file_error
 no_banked_data:
 
+        ; Quarth's initial image ends exactly where the page-1 runtime is
+        ; installed.  Other engines retain the older page-3 runtime path.
+        jp      is_quarth_dispatch
+
+legacy_runtime_path:
         call    install_page0_stubs
         call    install_runtime_stubs
 
-        ; Install the runtime page-3 trampoline and dynamic state while page
-        ; 3 still contains this player.  The final mapper write below is the
-        ; last instruction fetched from the relocated player bank.
+        ; Install the resident runtime trampoline and dynamic state while
+        ; page 3 still contains the fixed TPA player.
         call    install_init_trampoline
 
         ; Page 1 is the KSS RAM view.  Page 2 is either the 8K working RAM
-        ; view or the first 16K bank; page 3 becomes the RAM page containing
-        ; the return/wrapper/handler code.
-        ld      a,(RUNTIME_MAIN_TABLE+3)
-        ld      (page3_segment),a
+        ; view or the first 16K bank. Page 3 remains the fixed resident TPA.
         ld      a,(RUNTIME_MAIN_TABLE+1)
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
 
         ld      a,(bank_mode)
         and     0x80
@@ -227,21 +193,13 @@ no_banked_data:
         or      a
         jr      z,init_page2_is_ram
         ld      a,(RUNTIME_KSS_TABLE)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         jr      init_page2_ready
 init_page2_is_ram:
         ld      a,(RUNTIME_MAIN_TABLE+2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
 init_page2_ready:
-        ld      a,(page3_segment)
-        out     (MAPPER_PAGE3),a
-init_switch_next:
-        ; The next bytes are replaced in RAM by init_trampoline before the
-        ; page-3 mapper switch.  This label is intentionally not executed
-        ; from the relocated player bank.
-        nop
-        nop
-        nop
+        jp      init_trampoline
 
 format_error:
         ld      hl,msg_format
@@ -251,6 +209,9 @@ file_error:
         jr      report_error
 unsupported_bank:
         ld      hl,msg_bank
+        jr      report_error
+layout_error:
+        ld      hl,msg_layout
 report_error:
         ; Page 0 is still the BIOS at every error path.
         call    print_string
@@ -260,30 +221,33 @@ error_halt:
 ; Read the first 32 bytes from staged mapper bank 16 into the relocated
 ; player's private header buffer.
 read_header:
-        call    map_source_page1
+        ; Read through page 1.  This is important for QCPX: page 2 must
+        ; remain available for the SCC cartridge once playback starts.
+        ld      a,(RUNTIME_STAGE_TABLE)
+        call    PUT_P1_DISPATCH
         ld      hl,0x4000
         ld      de,header
         ld      bc,0x20
         ldir
         ld      a,(RUNTIME_BASIC_P1)
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
 
         ld      a,(header)
         cp      'K'
-        jr      nz,read_header_bad
+        jp      nz,read_header_bad
         ld      a,(header+1)
         cp      'S'
-        jr      nz,read_header_bad
+        jp      nz,read_header_bad
         ld      a,(header+2)
         cp      'C'
         jr      z,read_header_kscc
         cp      'S'
-        jr      nz,read_header_bad
+        jp      nz,read_header_bad
         ld      a,(header+3)
         cp      'C'
         jr      z,read_header_kscc
         cp      'X'
-        jr      nz,read_header_bad
+        jp      nz,read_header_bad
         ld      hl,0x20
         jr      read_header_base_ready
 read_header_kscc:
@@ -342,6 +306,7 @@ read_header_fast_done:
         ld      (source_position),hl
         xor     a
         ld      (source_position+2),a
+        call    probe_qcpx
         ld      hl,(load_address)
         ld      (destination),hl
         or      a
@@ -352,7 +317,6 @@ read_header_bad:
 
 ; Bank data is assigned dynamically by the DOS2 loader.
 validate_bank_range:
-        or      a
         ret
 
 ; Check that the initial image and all declared extra data fit inside the
@@ -409,19 +373,23 @@ check_file_size_bad:
         scf
         ret
 
-; Copy the declared initial image to its KSS load address.  Source is exposed
-; through page 1 and the destination through page 2, so the player bank at
-; page 3 remains executable even when the image covers C000H.
+; Clear the KSS main-RAM pages that are available to the engine.  Main
+; segment 0 deliberately remains untouched: the DOS2 COM loader stores the
+; page-1 runtime blob in that physical segment until Quarth has been fully
+; materialized.  The fixed page-3 TPA segment is also excluded.
 clear_main_ram:
-        xor     a
+        ld      a,1
         ld      (bank_index),a
 clear_main_ram_loop:
+        ld      a,(bank_index)
+        cp      3
+        jr      z,clear_main_ram_done
         ld      e,a
         ld      d,0
         ld      hl,RUNTIME_MAIN_TABLE
         add     hl,de
         ld      a,(hl)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ld      a,(bank_index)
         or      a
         jr      nz,clear_main_ram_zero
@@ -438,15 +406,13 @@ clear_main_ram_fill:
         ld      a,(bank_index)
         inc     a
         ld      (bank_index),a
-        cp      4
-        jr      nz,clear_main_ram_loop
+        jr      clear_main_ram_loop
+clear_main_ram_done:
         ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ret
 
 copy_initial_image:
-        ld      hl,(source_position)
-        ld      (source_position),hl
 copy_initial_loop:
         ld      bc,(remaining)
         ld      a,b
@@ -507,7 +473,7 @@ copy_8k_size_loop:
         ld      hl,0x8000
         ld      (destination),hl
         ld      a,(RUNTIME_KSS_TABLE)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
 copy_8k_loop:
         ld      bc,(remaining)
         ld      a,b
@@ -548,7 +514,7 @@ copy_8k_done:
         ld      a,(bank_source_start+2)
         ld      (source_position+2),a
         ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         or      a
         ret
 
@@ -621,7 +587,7 @@ copy_explicit_loop:
         ld      hl,RUNTIME_KSS_TABLE
         add     hl,de
         ld      a,(hl)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ld      hl,(source_position)
         ld      a,h
         and     0x3F
@@ -644,7 +610,7 @@ copy_explicit_loop:
         ld      a,(bank_source_start+2)
         ld      (source_position+2),a
         ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         or      a
         ret
 
@@ -724,7 +690,8 @@ map_source_page1:
         ld      hl,RUNTIME_STAGE_TABLE
         add     hl,de
         ld      a,(hl)
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
+        di
         ret
 
 map_destination_page2:
@@ -742,15 +709,30 @@ map_destination_page2:
         ld      hl,RUNTIME_MAIN_TABLE
         add     hl,de
         ld      a,(hl)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ret
 
 install_page0_stubs:
-        ; Page 0 was switched to RAM directly by map_ram_pages.  Access the
-        ; same physical segment through page 2 and install only the small
-        ; BIOS-compatible surface required by the KSS runtime.
+        ; Page 0 was switched to RAM by map_ram_pages.  PUT_P0 selects the
+        ; original page-0 segment captured by DOS2 before we modify the
+        ; user-reserved RST 28H vector.
         ld      a,(RUNTIME_MAIN_TABLE+0)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P0_DISPATCH
+        ld      hl,0x0028
+        ld      de,RST28_SAVED
+        ld      bc,4
+        ldir
+        ld      a,0xC3
+        ld      (0x0028),a
+        ld      hl,BANK0_HANDLER
+        ld      (0x0029),hl
+        ld      a,1
+        ld      (RST28_INSTALLED),a
+
+        ; Access the same physical page-0 segment through page 2 and install
+        ; only the small BIOS-compatible surface required by the KSS runtime.
+        ld      a,(RUNTIME_MAIN_TABLE+0)
+        call    PUT_P2_DISPATCH
 
         ld      hl,page0_wrtpsg
         ld      de,0x8001
@@ -761,9 +743,11 @@ install_page0_stubs:
         ld      bc,page0_rdpsg_end-page0_rdpsg
         ldir
 
-        ; RST 28H/30H are two-byte replacements for the original three-byte
-        ; KSS 8K selector stores.  RST 30H also handles patched OUT (FE),A
-        ; writes for 16K KSS images.
+        ; 8024H is the engine's ENASLT gateway.  Because this page-2 view is
+        ; the same physical segment as page 0, 8028H and 8030H alias the real
+        ; RST 28H/RST 30H vectors.  Keep the RST 28H route mode-dependent:
+        ; Quarth's 16K image uses RST 28H, while the known 8K adapter keeps
+        ; RST 28H for page-3/8K data and RST 30H for page-2 data.
         ld      a,0xC3
         ld      (0x8024),a
         ld      hl,CUSTOM_ENASLT
@@ -774,16 +758,19 @@ install_page0_stubs:
         ld      (0x8139),a
         ld      a,0xC3
         ld      (0x8028),a
+        ld      a,(bank_mode)
+        and     0x80
+        jr      nz,install_rst28_bank1
+        ld      hl,BANK0_HANDLER
+        jr      install_rst28_target
+install_rst28_bank1:
         ld      hl,BANK1_HANDLER
+install_rst28_target:
         ld      (0x8029),hl
         ld      a,0xC3
         ld      (0x8030),a
         ld      hl,BANK0_HANDLER
         ld      (0x8031),hl
-        ld      a,0xC3
-        ld      (0x8038),a
-        ld      hl,H_TIMI
-        ld      (0x8039),hl
         ld      a,0xC3
         ld      (0x8093),a
         ld      a,0x01
@@ -797,100 +784,152 @@ install_page0_stubs:
         xor     a
         ld      (0x8098),a
         ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         ret
 
 install_runtime_stubs:
-        ld      a,(RUNTIME_MAIN_TABLE+3)
-        out     (MAPPER_PAGE2),a
-        ; Keep the physical KSS segment table in the RAM page where the
-        ; handlers remain visible after page 3 is switched away from player.
+        ; All destinations below are in the fixed page-3 TPA.  No helper is
+        ; copied through page 2 and page 3 is never remapped.
         ld      hl,RUNTIME_KSS_TABLE
-        ld      de,0xB300
+        ld      de,KSS_TABLE_SAVED
         ld      bc,32
         ldir
-        ; Return stub at F380H, viewed through bank 0 at B380H.
         ld      hl,return_stub
-        ld      de,0xB380
+        ld      de,RETURN_STUB
         ld      bc,return_stub_end-return_stub
         ldir
-        ; The wrapper at F3A0H runs PLAY with KSS RAM visible and then
+        ; The wrapper runs PLAY with KSS RAM visible and then
         ; mirrors the SCC register shadow to the real SCC cartridge.
         ld      hl,play_wrapper
-        ld      de,0xB3A0
+        ld      de,PLAY_WRAPPER
         ld      bc,play_wrapper_end-play_wrapper
         ldir
-        ; The KSS image is allowed to use the ordinary RAM work area.  Put
-        ; the values needed by the interrupt path directly in the copied
-        ; instructions instead of leaving them in F370H..F37FH.
+        ; Put the values needed by the interrupt path directly in the copied
+        ; instructions.
         ld      hl,(play_address)
-        ld      (0xB3A0+(play_target_immediate-play_wrapper)+1),hl
+        ld      (PLAY_WRAPPER+(play_target_immediate-play_wrapper)+1),hl
         ld      a,(ram_slot)
-        ld      (0xB3A0+(ram_slot_immediate-play_wrapper)+1),a
+        ld      (PLAY_WRAPPER+(ram_slot_immediate-play_wrapper)+1),a
         ld      a,(RUNTIME_MAIN_TABLE+2)
-        ld      (0xB3A0+(page2_restore_immediate-play_wrapper)+1),a
+        ld      (PLAY_WRAPPER+(page2_restore_immediate-play_wrapper)+1),a
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      (PLAY_WRAPPER+(scc_slot_immediate-play_wrapper)+1),a
         ld      hl,bank0_handler
-        ld      de,BANK0_HANDLER-0x4000
+        ld      de,BANK0_HANDLER
         ld      bc,bank0_handler_end-bank0_handler
         ldir
         ld      a,(bank_mode)
-        ld      (BANK0_HANDLER-0x4000+(bank0_mode_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_mode_immediate-bank0_handler)+1),a
         ld      a,(bank_offset)
-        ld      (BANK0_HANDLER-0x4000+(bank0_offset_immediate-bank0_handler)+1),a
-        ld      (BANK0_HANDLER-0x4000+(bank0_16k_offset_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_offset_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_16k_offset_immediate-bank0_handler)+1),a
         ld      a,(bank_count)
-        ld      (BANK0_HANDLER-0x4000+(bank0_count_immediate-bank0_handler)+1),a
-        ld      (BANK0_HANDLER-0x4000+(bank0_16k_count_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_count_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_16k_count_immediate-bank0_handler)+1),a
         ld      a,(RUNTIME_MAIN_TABLE+2)
-        ld      (BANK0_HANDLER-0x4000+(bank0_main2_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_main2_immediate-bank0_handler)+1),a
         ld      a,(RUNTIME_KSS_TABLE)
-        ld      (BANK0_HANDLER-0x4000+(bank0_storage_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_storage_immediate-bank0_handler)+1),a
         ld      a,(RUNTIME_MAIN_TABLE+1)
-        ld      (BANK0_HANDLER-0x4000+(bank0_page1_immediate-bank0_handler)+1),a
+        ld      (BANK0_HANDLER+(bank0_page1_immediate-bank0_handler)+1),a
         ld      hl,bank1_handler
-        ld      de,BANK1_HANDLER-0x4000
+        ld      de,BANK1_HANDLER
         ld      bc,bank1_handler_end-bank1_handler
         ldir
         ld      a,(bank_offset)
-        ld      (BANK1_HANDLER-0x4000+(bank1_offset_immediate-bank1_handler)+1),a
+        ld      (BANK1_HANDLER+(bank1_offset_immediate-bank1_handler)+1),a
         ld      a,(bank_count)
-        ld      (BANK1_HANDLER-0x4000+(bank1_count_immediate-bank1_handler)+1),a
+        ld      (BANK1_HANDLER+(bank1_count_immediate-bank1_handler)+1),a
         ld      a,(bank_mode)
-        ld      (BANK1_HANDLER-0x4000+(bank1_mode_immediate-bank1_handler)+1),a
+        ld      (BANK1_HANDLER+(bank1_mode_immediate-bank1_handler)+1),a
         ld      a,(RUNTIME_KSS_TABLE)
-        ld      (BANK1_HANDLER-0x4000+(bank1_storage_immediate-bank1_handler)+1),a
+        ld      (BANK1_HANDLER+(bank1_storage_immediate-bank1_handler)+1),a
         ld      a,(RUNTIME_MAIN_TABLE+1)
-        ld      (BANK1_HANDLER-0x4000+(bank1_page1_immediate-bank1_handler)+1),a
+        ld      (BANK1_HANDLER+(bank1_page1_immediate-bank1_handler)+1),a
         ld      hl,custom_enaslt
-        ld      de,CUSTOM_ENASLT-0x4000
+        ld      de,CUSTOM_ENASLT
         ld      bc,custom_enaslt_end-custom_enaslt
         ldir
-        ; H.TIMI at FD9FH: JP PLAY_WRAPPER, EI, RET.
-        ld      a,0xC3
-        ld      (0xBD9F),a
-        ld      hl,PLAY_WRAPPER
-        ld      (0xBDA0),hl
-        ld      a,0xFB
-        ld      (0xBDA2),a
-        ld      a,0xC9
-        ld      (0xBDA3),a
-        ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        ld      hl,put_p0_dispatch
+        ld      de,PUT_P0_DISPATCH
+        ld      bc,put_p0_dispatch_end-put_p0_dispatch
+        ldir
+        ld      hl,put_p1_dispatch
+        ld      de,PUT_P1_DISPATCH
+        ld      bc,put_p1_dispatch_end-put_p1_dispatch
+        ldir
+        ld      hl,put_p2_dispatch
+        ld      de,PUT_P2_DISPATCH
+        ld      bc,put_p2_dispatch_end-put_p2_dispatch
+        ldir
+        ; Playback is clocked by the return stub's EI/HALT loop.  Leave the
+        ; BIOS H.TIMI hook and the IM1 RST 38H chain untouched so DOS2 still
+        ; acknowledges VDP interrupts and maintains its own timing state.
+        xor     a
+        ld      (HTIMI_INSTALLED),a
         ret
 
 install_init_trampoline:
-        ld      a,(RUNTIME_MAIN_TABLE+3)
-        out     (MAPPER_PAGE2),a
-        ld      hl,init_trampoline
-        ld      de,0x8000+(init_switch_next-0xC000)
-        ld      bc,init_trampoline_end-init_trampoline
-        ldir
         ld      a,(song_number)
-        ld      (0x8000+(init_song_immediate-init_trampoline)+1+(init_switch_next-0xC000)),a
+        ld      (init_song_immediate+1),a
         ld      hl,(init_address)
-        ld      (0x8000+(init_target_immediate-init_trampoline)+1+(init_switch_next-0xC000)),hl
-        ld      a,(RUNTIME_BASIC_P2)
-        out     (MAPPER_PAGE2),a
+        ld      (init_target_immediate+1),hl
+        ret
+
+; Obtain the DOS2 mapper call table for both the COM front-end and the
+; legacy BASIC entry.  The table layout is PUT_P0/GET_P0, PUT_P1/GET_P1,
+; PUT_P2/GET_P2, PUT_P3/GET_P3, in three-byte call slots.
+init_mapper_api:
+        xor     a
+        ld      d,4
+        ld      e,2
+        call    EXTBIO
+        or      a
+        ret     z
+        push    hl
+        ld      de,0x18
+        add     hl,de
+        ld      (RUNTIME_PUT_P0),hl
+        pop     hl
+        push    hl
+        ld      de,0x1E
+        add     hl,de
+        ld      (RUNTIME_PUT_P1),hl
+        pop     hl
+        ld      de,0x24
+        add     hl,de
+        ld      (RUNTIME_PUT_P2),hl
+        ret
+
+; Copy the tiny indirect mapper gateways into the fixed page-3 resident
+; area before any materialization code can request a new page.
+install_dispatches:
+        call    ensure_scc_slot
+        ld      hl,put_p0_dispatch
+        ld      de,PUT_P0_DISPATCH
+        ld      bc,put_p0_dispatch_end-put_p0_dispatch
+        ldir
+        ld      hl,put_p1_dispatch
+        ld      de,PUT_P1_DISPATCH
+        ld      bc,put_p1_dispatch_end-put_p1_dispatch
+        ldir
+        ld      hl,put_p2_dispatch
+        ld      de,PUT_P2_DISPATCH
+        ld      bc,put_p2_dispatch_end-put_p2_dispatch
+        ldir
+        ret
+
+; The DOS2 front-end writes the requested slot and magic before entering the
+; bootstrap.  Disk BASIC has no command-line handoff, so initialize the
+; documented default only when the magic is absent.
+ensure_scc_slot:
+        ld      a,(RUNTIME_SCC_SLOT_VALID)
+        cp      SCC_SLOT_MAGIC
+        ret     z
+        ld      a,SCC_SLOT_DEFAULT
+        ld      (RUNTIME_SCC_SLOT),a
+        ld      a,SCC_SLOT_MAGIC
+        ld      (RUNTIME_SCC_SLOT_VALID),a
         ret
 
 map_ram_pages:
@@ -898,20 +937,21 @@ map_ram_pages:
         ld      (ram_slot),a
         ld      h,0x40
         call    BIOS_ENASLT
+        di
         ld      a,(ram_slot)
         ld      h,0x80
         call    BIOS_ENASLT
-        ld      a,(ram_slot)
-        ld      h,0xC0
-        call    BIOS_ENASLT
-        ; Switch page 0 by writing the primary/secondary slot registers
-        ; directly.  BIOS ENASLT cannot be used after page 3 is RAM because
-        ; its jump-table implementation lives in the BIOS page-3 image.
+        di
+        ; Page 0 is selected from the current RAMAD1 slot after the BIOS
+        ; calls have completed; page 3 remains selected throughout.
+        call    map_ram_page0
+        ret
 map_ram_page0:
-        ld      a,(ram_slot)
+        ld      a,(BIOS_RAMAD1)
         ld      b,a
         bit     7,b
         jr      z,map_ram_page0_primary
+        ; FFFFH reads as the inverted secondary-slot register on MSX.
         ld      a,(0xFFFF)
         cpl
         and     0xFC
@@ -949,7 +989,9 @@ page0_rdpsg_end:
 
 return_stub:
         im      1
+        ei
 return_stub_halt:
+        halt
         call    PLAY_WRAPPER
         jr      return_stub_halt
 return_stub_end:
@@ -981,9 +1023,16 @@ play_after:
         ld      de,SCC_PLUS_SHADOW
         ld      bc,0x0100
         ldir
-        ld      a,SCC_SLOT
+scc_slot_immediate:
+        ld      a,0
         ld      h,0x80
-        call    BIOS_ENASLT
+        call    CUSTOM_ENASLT
+        ; Konami SCC cartridges require the enable write before the register
+        ; window at 9800H is used.  Repeating it after every slot selection
+        ; is harmless and also covers cartridges that reset their enable
+        ; latch when the primary slot changes.
+        ld      a,0x3F
+        ld      (0x9000),a
         ld      hl,SCC_SHADOW
         ld      de,0x9800
         ld      bc,0x0100
@@ -996,10 +1045,10 @@ play_after:
 ram_slot_immediate:
         ld      a,0
         ld      h,0x80
-        call    BIOS_ENASLT
+        call    CUSTOM_ENASLT
 page2_restore_immediate:
         ld      a,0
-        out     (MAPPER_PAGE2),a
+        call    PUT_P2_DISPATCH
         pop     iy
         pop     ix
         pop     hl
@@ -1045,14 +1094,12 @@ bank0_16k_count_immediate:
         add     hl,de
         ld      a,(hl)
         ld      (PAGE2_RESTORE_SAVED),a
-        out     (MAPPER_PAGE2),a
-        jr      bank0_handler_done
+        jr      bank0_handler_16k_done
 bank0_handler_16k_invalid:
 bank0_main2_immediate:
         ld      a,0
         ld      (PAGE2_RESTORE_SAVED),a
-        out     (MAPPER_PAGE2),a
-        jr      bank0_handler_done
+        jr      bank0_handler_16k_done
 
 bank0_handler_8k:
         ld      a,b
@@ -1071,7 +1118,7 @@ bank0_count_immediate:
         jr      z,bank0_handler_8k_invalid
 bank0_storage_immediate:
         ld      a,0
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
         ld      a,c
         or      a
         jr      z,bank0_handler_8k_source0
@@ -1085,7 +1132,7 @@ bank0_handler_8k_source_ready:
         ldir
 bank0_page1_immediate:
         ld      a,0
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
         jr      bank0_handler_done
 bank0_handler_8k_invalid:
         ld      hl,0x8000
@@ -1098,6 +1145,14 @@ bank0_handler_8k_fill:
         ld      a,d
         or      e
         jr      nz,bank0_handler_8k_fill
+bank0_handler_16k_done:
+        pop     hl
+        pop     de
+        pop     bc
+        pop     af
+        ld      a,(PAGE2_RESTORE_SAVED)
+        call    PUT_P2_DISPATCH
+        ret
 bank0_handler_done:
         pop     hl
         pop     de
@@ -1132,7 +1187,7 @@ bank1_mode_immediate:
         jr      z,bank1_handler_invalid
 bank1_storage_immediate:
         ld      a,0
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
         ld      a,c
         or      a
         jr      z,bank1_handler_source0
@@ -1146,7 +1201,7 @@ bank1_handler_source_ready:
         ldir
 bank1_page1_immediate:
         ld      a,0
-        out     (MAPPER_PAGE1),a
+        call    PUT_P1_DISPATCH
         jr      bank1_handler_done
 bank1_handler_invalid:
         ld      hl,0xA000
@@ -1167,37 +1222,29 @@ bank1_handler_done:
         ret
 bank1_handler_end:
 
-; Local replacement for BIOS ENASLT.  The runtime only needs page 2, so this
-; routine updates the page-2 primary and secondary slot fields directly and
-; remains callable after page 3 has become ordinary RAM.
+; ENASLT gateway used after page 0 has become RAM.  Directly editing FFFFH is
+; only safe when the target expanded primary slot is already visible in page
+; 3; otherwise FFFFH belongs to the wrong primary slot and remapping page 3
+; would remove the executing code and stack.  Temporarily expose the BIOS in
+; page 0, call the real BIOS ENASLT (which performs and restores its page-3
+; trampoline), then restore only the original page-0 primary bits.
 custom_enaslt:
         push    af
         push    bc
         push    de
         push    hl
         ld      b,a
-        bit     7,b
-        jr      z,custom_enaslt_primary
-        ld      a,(0xFFFF)
-        cpl
-        and     0xCF
-        ld      c,a
-        ld      a,b
-        and     0xC0
-        rrca
-        rrca
-        or      c
-        ld      (0xFFFF),a
-custom_enaslt_primary:
         in      a,(0xA8)
-        and     0xCF
-        ld      c,a
+        ld      (SLOT_A8_SAVED),a
+        and     0xFC
+        out     (0xA8),a
         ld      a,b
+        call    BIOS_ENASLT
+        ld      a,(SLOT_A8_SAVED)
         and     0x03
-        rla
-        rla
-        rla
-        rla
+        ld      c,a
+        in      a,(0xA8)
+        and     0xFC
         or      c
         out     (0xA8),a
         pop     hl
@@ -1207,8 +1254,58 @@ custom_enaslt_primary:
         ret
 custom_enaslt_end:
 
+; Indirect DOS2 PUT_P2 call used after the player has taken over. The
+; routine itself lives in the resident page-3 player image, while DOS2
+; retains ownership of the actual mapper operation.
+put_p0_dispatch:
+        ld      hl,(RUNTIME_PUT_P0)
+        jp      (hl)
+put_p0_dispatch_end:
+
+put_p1_dispatch:
+        ld      hl,(RUNTIME_PUT_P1)
+        jp      (hl)
+put_p1_dispatch_end:
+
+put_p2_dispatch:
+        ld      hl,(RUNTIME_PUT_P2)
+        jp      (hl)
+put_p2_dispatch_end:
+
+; Restore the user restart/vector state and the mapper pages owned by the
+; player. The final page-3 slot restoration belongs to the DOS2 front-end,
+; because returning through code in page 3 after changing that slot is unsafe.
+stop_runtime:
+        ld      a,(RST28_INSTALLED)
+        or      a
+        jr      z,stop_runtime_no_rst28
+        ld      a,(RUNTIME_MAIN_TABLE+0)
+        call    PUT_P0_DISPATCH
+        ld      hl,RST28_SAVED
+        ld      de,0x0028
+        ld      bc,4
+        ldir
+        xor     a
+        ld      (RST28_INSTALLED),a
+stop_runtime_no_rst28:
+        ld      a,(HTIMI_INSTALLED)
+        or      a
+        jr      z,stop_runtime_no_htimi
+        ld      hl,HTIMI_SAVED
+        ld      de,H_TIMI
+        ld      bc,5
+        ldir
+        xor     a
+        ld      (HTIMI_INSTALLED),a
+stop_runtime_no_htimi:
+        ld      a,(RUNTIME_MAIN_TABLE+1)
+        call    PUT_P1_DISPATCH
+        ld      a,(RUNTIME_ORIGINAL_P2)
+        call    PUT_P2_DISPATCH
+        ret
+
 init_trampoline:
-        ld      sp,STACK_TOP
+        ld      sp,(RUNTIME_STACK_TOP)
         ld      hl,RETURN_STUB
         push    hl
 init_song_immediate:
@@ -1229,7 +1326,6 @@ msg_8k:
         defm    13,10,"8K BANKED KSS NEEDS KSSPLAY.COM",13,10,0
 msg_bank:
         defm    13,10,"KSS BANK RANGE NEEDS MORE MAPPER SPACE",13,10,0
-
 header:         defs    0x20,0
 file_size:      defs    3,0
 load_address:   defw    0
@@ -1251,14 +1347,655 @@ bank_count:     defb    0
 bank_index:     defb    0
 bank_mode:      defb    0
 extra_size:     defb    0
+fast_8k:        defb    0
 ram_slot:       defb    0
 song_number:    defb    0
-page3_segment:  defb    0
-
 ; The DOS2 loader fills this block after copying the player to C000H.  It is
 ; copied along with the player when start_player relocates the code.
         defs    RUNTIME_CONFIG-$,0
 runtime_config:
         defs    RUNTIME_CONFIG_END-RUNTIME_CONFIG,0
+
+; QCPX materializer state.  This follows the fixed handoff block so the
+; original bootstrap still reaches RUNTIME_CONFIG at exactly C960H.
+qcp_format:     defb    0
+qcp_page_count: defb    0
+qcp_track_count:defb    0
+qcp_page_index: defb    0
+qcp_selected_page: defb 0
+qcp_original_song:  defb 0
+qcp_dest_segment:   defb 0
+qcp_selected_segment:defb 0
+qcp_value:      defb    0
+qcp_scc_primary_bits:defb 0
+qcp_engine_size:    defw 0
+qcp_common_size:    defw 0
+qcp_page_data_address:defw 0
+qcp_engine_source:  defw 0
+qcp_common_source:  defw 0
+qcp_records_source: defw 0
+qcp_cursor:     defw    0
+qcp_data_size:  defw    0
+qcp_patch_count:defw    0
+qcp_patch_left: defw    0
+qcp_patch_offset:defw  0
+qcp_patch_value:defw    0
+qcp_dest_offset:defw    0
+qcp_remaining:  defw    0
+qcp_chunk_size: defw    0
+
+; Kept after the fixed handoff block so the player can retain its C960H
+; runtime configuration without growing into the resident page-3 helpers.
+check_load_window:
+        ld      hl,(load_address)
+        ld      a,h
+        cp      0x40
+        jr      c,check_load_window_bad
+        ld      de,(remaining)
+        add     hl,de
+        jr      c,check_load_window_bad
+        ld      a,h
+        cp      0xC0
+        jr      nc,check_load_window_bad
+        or      a
+        ret
+check_load_window_bad:
+        scf
+        ret
+msg_layout:
+        defm    13,10,"KSS LOAD IMAGE MUST STAY BELOW C000H",13,10,0
+
+player_code_end:
+
+; Detect the repacked raw Quarth image. The page-1 runtime layout is only
+; safe for this image because its main image ends at 52E4H.
+is_quarth_dispatch:
+        ld      hl,(load_address)
+        ld      de,0x4000
+        or      a
+        sbc     hl,de
+        jp      nz,legacy_runtime_path
+        ; copy_initial_image consumes remaining and leaves destination at the
+        ; end of the main image, so test that final address here.
+        ld      hl,(destination)
+        ld      de,0x52E4
+        or      a
+        sbc     hl,de
+        jp      nz,legacy_runtime_path
+        ld      hl,(init_address)
+        ld      de,0x52BB
+        or      a
+        sbc     hl,de
+        jp      nz,legacy_runtime_path
+        ld      hl,(play_address)
+        ld      de,0x52DF
+        or      a
+        sbc     hl,de
+        jp      nz,legacy_runtime_path
+        ld      a,(bank_mode)
+        cp      0x02
+        jp      nz,legacy_runtime_path
+        ; The exact Quarth signature above already identifies the repacked
+        ; two-bank image.  Do not make the hand-off depend on the mutable
+        ; parser bookkeeping byte after the bank materialization loops.
+        jp      prepare_quarth_runtime
+
+; Move the page-1 runtime over the free tail of Quarth's main image. The
+; bootstrap remains in page 3 only until this copy has completed; no player
+; code or player buffers remain active there during playback.
+prepare_quarth_runtime:
+        ld      a,(RUNTIME_MAIN_TABLE+1)
+        call    PUT_P1_DISPATCH
+        ld      hl,(RUNTIME_BLOB_SOURCE)
+        ld      de,PLAYER_RUNTIME_BASE
+        ld      bc,(RUNTIME_BLOB_SIZE)
+        ldir
+        ld      hl,RUNTIME_CONFIG
+        ld      de,PLAYER_RUNTIME_CONFIG_TARGET
+        ld      bc,RUNTIME_CONFIG_END-RUNTIME_CONFIG
+        ldir
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      (PLAYER_RUNTIME_SCC_SLOT_TARGET),a
+        ld      a,(RUNTIME_SCC_SLOT_VALID)
+        ld      (PLAYER_RUNTIME_SCC_SLOT_VALID_TARGET),a
+        jp      PLAYER_RUNTIME_ENTRY
+
+; Entry target for the page-1 build. It is reached through the three-byte
+; trampoline inserted before copy_field by the build script. The image and
+; both KSS banks are already materialized, so no page-1 source window is ever
+; needed after this point.
+runtime_ready_impl:
+        di
+        ld      sp,(RUNTIME_STACK_TOP)
+        call    install_dispatches
+        ld      hl,(BASIC_SIZE)
+        ld      (file_size),hl
+        ld      a,(BASIC_SIZE+2)
+        ld      (file_size+2),a
+        ld      a,(BASIC_SONG)
+        ld      (song_number),a
+        call    read_header
+        jp      c,format_error
+        call    install_page0_stubs
+        call    install_runtime_stubs
+        call    install_init_trampoline
+        ld      a,(RUNTIME_MAIN_TABLE+1)
+        call    PUT_P1_DISPATCH
+        ld      a,(RUNTIME_KSS_TABLE)
+        call    PUT_P2_DISPATCH
+        jp      init_trampoline
+
+; -------------------------------------------------------------------------
+; QCPX complete-page Quarth path
+;
+; QCPX stores one engine template and one common-data template, followed by
+; five page records.  The DOS2 player expands each record into an allocated
+; mapper segment.  All copying is done through page 1, using a reserved
+; page-3 TPA block as a 0400H scratch window because a Z80 cannot expose both a
+; staging segment and a destination segment in the same mapper page at once.
+; Page 2 is never used as a RAM copy window here: after materialization it is
+; selected to the SCC cartridge and stays there for INIT and PLAY.
+
+qcpx_runtime_path:
+        call    qcpx_parse
+        jp      c,format_error
+        call    qcpx_get_song_mapping
+        jp      c,format_error
+        call    qcpx_materialize_selected
+        jp      c,format_error
+
+        ; Install only the fixed page-3 runtime helpers.  Do not install the
+        ; old page-0 RST 28H gateway: QCPX's complete pages never bank-switch
+        ; through page 0 and page 0 must remain DOS2-owned.
+        call    install_runtime_stubs
+        ; install_runtime_stubs places the legacy shadow-copy wrapper at
+        ; CC20H. Replace it in-place with a direct QCPX wrapper. BIOS/DOS can
+        ; restore its normal mapper and slot layout while servicing HALT, so
+        ; every PLAY must first reassert page 1 and the page-2 SCC slot.
+        ;
+        ;   LD A,page1_segment / CALL PUT_P1
+        ;   LD A,scc_slot / LD H,80H / CALL CUSTOM_ENASLT
+        ;   LD HL,play / LD DE,return / PUSH DE / JP (HL) / RET
+        ld      hl,PLAY_WRAPPER
+        ld      (hl),0x3E
+        inc     hl
+        ld      a,(qcp_selected_segment)
+        ld      (hl),a
+        inc     hl
+        ld      (hl),0xCD
+        inc     hl
+        ld      (hl),0x10
+        inc     hl
+        ld      (hl),0xD0
+        inc     hl
+        ld      (hl),0x3E
+        inc     hl
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      (hl),a
+        inc     hl
+        ld      (hl),0x26
+        inc     hl
+        ld      (hl),0x80
+        inc     hl
+        ld      (hl),0xCD
+        inc     hl
+        ld      (hl),0x00
+        inc     hl
+        ld      (hl),0xCF
+        inc     hl
+        ld      (hl),0x21
+        inc     hl
+        ld      de,(play_address)
+        ld      (hl),e
+        inc     hl
+        ld      (hl),d
+        inc     hl
+        ld      (hl),0x11
+        inc     hl
+        ld      de,PLAY_WRAPPER+20
+        ld      (hl),e
+        inc     hl
+        ld      (hl),d
+        inc     hl
+        ld      (hl),0xD5
+        inc     hl
+        ld      (hl),0xE9
+        inc     hl
+        ld      (hl),0xC9
+
+        ; The OpenMSX/extb SCC is a non-expanded primary slot. Selecting it
+        ; needs only the page-2 bits of port A8; BIOS ENASLT is unnecessary
+        ; and its page-3 trampoline is unsafe for our resident TPA code.
+        ld      a,(RUNTIME_SCC_SLOT)
+        cp      4
+        jp      nc,format_error
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      (qcp_scc_primary_bits),a
+        ld      hl,CUSTOM_ENASLT
+        ld      (hl),0xF5             ; PUSH AF
+        inc     hl
+        ld      (hl),0xDB             ; IN A,(A8H)
+        inc     hl
+        ld      (hl),0xA8
+        inc     hl
+        ld      (hl),0xE6             ; AND CFH: preserve pages 0,1,3
+        inc     hl
+        ld      (hl),0xCF
+        inc     hl
+        ld      (hl),0xF6             ; OR primary-slot page-2 bits
+        inc     hl
+        ld      a,(qcp_scc_primary_bits)
+        ld      (hl),a
+        inc     hl
+        ld      (hl),0xD3             ; OUT (A8H),A
+        inc     hl
+        ld      (hl),0xA8
+        inc     hl
+        ld      (hl),0xF1             ; POP AF
+        inc     hl
+        ld      (hl),0xC9             ; RET
+
+        ; Page 2 is the real SCC slot for the complete-page engine.  This
+        ; call runs from fixed page 3 and therefore remains safe while the
+        ; page-2 primary slot is changed.
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      h,0x80
+        call    CUSTOM_ENASLT
+        ; Enable the Konami SCC register window in the selected cartridge.
+        ; QCPX keeps page 2 on this slot for the complete playback lifetime.
+        ld      a,0x3F
+        ld      (0x9000),a
+
+        ld      a,(qcp_original_song)
+        ld      (song_number),a
+        call    install_init_trampoline
+        ld      a,(qcp_selected_segment)
+        call    PUT_P1_DISPATCH
+        jp      init_trampoline
+
+qcpx_parse:
+        ; Header fields are little-endian and live at QCPX+04..0F.
+        ld      hl,0x25
+        call    qcpx_set_source
+        call    qcpx_read_byte
+        cp      1
+        jr      nz,qcpx_parse_bad
+        call    qcpx_read_byte
+        or      a
+        jr      z,qcpx_parse_bad
+        cp      33
+        jr      nc,qcpx_parse_bad
+        ld      (qcp_page_count),a
+        call    qcpx_read_byte
+        ld      (qcp_track_count),a
+        call    qcpx_read_byte
+
+        ld      hl,0x29
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_engine_size),hl
+        call    qcpx_read_word
+        ld      (qcp_common_size),hl
+        call    qcpx_read_word
+        ld      (qcp_page_data_address),hl
+        call    qcpx_read_word
+
+        ; The current Quarth builder deliberately fixes these addresses.  A
+        ; mismatch is rejected instead of silently materializing a corrupt
+        ; page with incorrect absolute references.
+        ld      hl,(qcp_page_data_address)
+        ld      de,0x65B5
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      hl,(qcp_engine_size)
+        ld      a,h
+        cp      0x40
+        jr      nc,qcpx_parse_bad
+        ld      hl,(qcp_common_size)
+        ld      a,h
+        cp      0x40
+        jr      nc,qcpx_parse_bad
+
+        ; The shared blobs and page records are addressed from the original
+        ; file, whose QCPX signature starts at offset 21H.
+        ld      hl,0x231
+        ld      (qcp_engine_source),hl
+        ld      de,(qcp_engine_size)
+        add     hl,de
+        ld      (qcp_common_source),hl
+        ld      de,(qcp_common_size)
+        add     hl,de
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+qcpx_parse_bad:
+        scf
+        ret
+
+; Map the source-positioned byte and return it in A.  The original page-1
+; segment is restored before returning so every metadata read is isolated.
+; The source position is advanced by one byte.
+qcpx_read_byte:
+        call    map_source_page1
+        ld      hl,(source_position)
+        ld      a,h
+        and     0x3F
+        or      0x40
+        ld      h,a
+        ld      a,(hl)
+        ld      (qcp_value),a
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        ld      hl,(source_position)
+        inc     hl
+        ld      (source_position),hl
+        ld      a,h
+        or      l
+        jr      nz,qcpx_read_byte_no_carry
+        ld      a,(source_position+2)
+        inc     a
+        ld      (source_position+2),a
+qcpx_read_byte_no_carry:
+        ld      a,(qcp_value)
+        ret
+
+qcpx_read_word:
+        call    qcpx_read_byte
+        push    af
+        call    qcpx_read_byte
+        ld      h,a
+        pop     af
+        ld      l,a
+        ret
+
+qcpx_set_source:
+        ld      (source_position),hl
+        xor     a
+        ld      (source_position+2),a
+        ret
+
+; Translate the new contiguous song ID to the original Quarth selector and
+; to its complete mapper page.
+qcpx_get_song_mapping:
+        ld      a,(song_number)
+        ld      c,a
+        ld      b,0
+        ld      hl,0x31              ; QCPX + 10H
+        add     hl,bc
+        call    qcpx_set_source
+        call    qcpx_read_byte
+        cp      0xFF
+        jr      z,qcpx_mapping_bad
+        ld      (qcp_original_song),a
+
+        ; qcpx_read_byte/map_source_page1 uses C internally. Reload the
+        ; requested contiguous song ID before indexing the page table;
+        ; otherwise every song accidentally materializes logical page 0.
+        ld      a,(song_number)
+        ld      c,a
+        ld      b,0
+        ld      hl,0x131             ; QCPX + 110H
+        add     hl,bc
+        call    qcpx_set_source
+        call    qcpx_read_byte
+        cp      0xFF
+        jr      z,qcpx_mapping_bad
+        ld      c,a
+        ld      a,(qcp_page_count)
+        cp      c
+        jr      c,qcpx_mapping_bad
+        jr      z,qcpx_mapping_bad
+        ld      a,c
+        ld      (qcp_selected_page),a
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        or      a
+        ret
+qcpx_mapping_bad:
+        scf
+        ret
+
+qcpx_materialize_selected:
+        ; Only one physical page is required on MSX.  The selected logical
+        ; record is expanded into the first allocated KSS segment; selecting
+        ; another song later simply rebuilds this same segment.
+        ld      a,(qcp_selected_page)
+        ld      (qcp_page_index),a
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        call    qcpx_materialize_page
+        ret
+
+qcpx_materialize_page:
+        ; Select the one physical destination segment reserved for QCPX.
+        ld      a,(qcp_selected_segment)
+        ld      (qcp_dest_segment),a
+
+        ; Match the host QCPX materializer: a newly allocated mapper segment
+        ; is not guaranteed to contain zeroes, while Quarth assumes its
+        ; relocated work area starts clear. Clear the whole complete page
+        ; before installing engine, common data and the selected payload.
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x4000),a
+        ld      hl,0x4000
+        ld      de,0x4001
+        ld      bc,0x3FFF
+        ldir
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+
+        ; Engine template at complete-page offset 0000H.
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        xor     a
+        ld      (qcp_dest_offset),a
+        ld      (qcp_dest_offset+1),a
+        ld      bc,(qcp_engine_size)
+        call    qcpx_copy_range
+
+        ; Common template immediately follows the engine.
+        ld      hl,(qcp_common_source)
+        call    qcpx_set_source
+        ld      hl,(qcp_engine_size)
+        ld      (qcp_dest_offset),hl
+        ld      bc,(qcp_common_size)
+        call    qcpx_copy_range
+
+        ; Locate this page's record.  Each record is:
+        ;   data_size, patch_count, patch_count*(offset,value), data.
+        ld      hl,(qcp_records_source)
+        ld      (qcp_cursor),hl
+        ld      a,(qcp_page_index)
+        ld      (qcp_page_index),a
+qcpx_record_scan:
+        ld      hl,(qcp_cursor)
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_data_size),hl
+        call    qcpx_read_word
+        ld      (qcp_patch_count),hl
+        ld      a,(qcp_page_index)
+        or      a
+        jr      z,qcpx_record_found
+        ; cursor += 4 + (patch_count * 4) + data_size
+        ld      hl,(qcp_patch_count)
+        add     hl,hl
+        add     hl,hl
+        ld      de,4
+        add     hl,de
+        ld      de,(qcp_data_size)
+        add     hl,de
+        ld      de,(qcp_cursor)
+        add     hl,de
+        ld      (qcp_cursor),hl
+        ld      a,(qcp_page_index)
+        dec     a
+        ld      (qcp_page_index),a
+        jr      qcpx_record_scan
+
+qcpx_record_found:
+        ; Payload follows the fixed header and patch table.
+        ld      hl,(qcp_cursor)
+        ld      de,4
+        add     hl,de
+        ld      de,(qcp_patch_count)
+        ex      de,hl
+        add     hl,hl
+        add     hl,hl
+        ex      de,hl
+        add     hl,de
+        call    qcpx_set_source
+        ld      hl,(qcp_page_data_address)
+        ld      (qcp_dest_offset),hl
+        ld      bc,(qcp_data_size)
+        call    qcpx_copy_range
+
+        ; Patch relocated common pointers into this materialized page.
+        ld      hl,(qcp_cursor)
+        ld      de,4
+        add     hl,de
+        call    qcpx_set_source
+        call    qcpx_apply_patches
+        or      a
+        ret
+
+qcpx_apply_patches:
+        ld      hl,(qcp_patch_count)
+        ld      (qcp_patch_left),hl
+qcpx_patch_loop:
+        ld      hl,(qcp_patch_left)
+        ld      a,h
+        or      l
+        jr      z,qcpx_patch_done
+        call    qcpx_read_word
+        ld      (qcp_patch_offset),hl
+        call    qcpx_read_word
+        ld      (qcp_patch_value),hl
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        ld      hl,(qcp_patch_offset)
+        ld      de,(qcp_engine_size)
+        add     hl,de
+        ld      de,0x4000
+        add     hl,de
+        ld      de,(qcp_patch_value)
+        ld      (hl),e
+        inc     hl
+        ld      (hl),d
+        ld      hl,(qcp_patch_left)
+        dec     hl
+        ld      (qcp_patch_left),hl
+        jr      qcpx_patch_loop
+qcpx_patch_done:
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        ret
+
+; Copy a range from the staged file to the selected physical page-1 segment.
+; The source position and destination offset are set by the caller, and BC
+; contains the range length.  A 0400H scratch buffer avoids aliasing the two
+; page-1 mappings.
+qcpx_copy_range:
+        ld      (qcp_remaining),bc
+qcpx_copy_loop:
+        ld      hl,(qcp_remaining)
+        ld      a,h
+        or      l
+        jp      z,qcpx_copy_done
+        ld      bc,(qcp_remaining)
+        call    source_boundary
+        call    cap_bc_hl
+        ld      (qcp_chunk_size),bc
+        ld      hl,(qcp_dest_offset)
+        ld      a,h
+        and     0x3F
+        ld      h,a
+        ld      de,0x4000
+        ex      de,hl
+        ld      bc,(qcp_chunk_size)
+        call    cap_bc_hl
+        ld      (qcp_chunk_size),bc
+        ; Never use more than the fixed page-3 scratch buffer.
+        ld      hl,0x0400
+        ld      bc,(qcp_chunk_size)
+        call    cap_bc_hl
+        ld      (qcp_chunk_size),bc
+
+        call    map_source_page1
+        ld      hl,(source_position)
+        ld      a,h
+        and     0x3F
+        or      0x40
+        ld      h,a
+        ld      de,QCPX_SCRATCH
+        ld      bc,(qcp_chunk_size)
+        ldir
+
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        ld      hl,(qcp_dest_offset)
+        ld      a,h
+        and     0x3F
+        or      0x40
+        ld      h,a
+        ex      de,hl
+        ld      hl,QCPX_SCRATCH
+        ld      bc,(qcp_chunk_size)
+        ldir
+
+        ld      hl,(qcp_chunk_size)
+        ld      (chunk_size),hl
+        call    advance_source
+        ld      hl,(qcp_dest_offset)
+        ld      de,(qcp_chunk_size)
+        add     hl,de
+        ld      (qcp_dest_offset),hl
+        ld      hl,(qcp_remaining)
+        ld      de,(qcp_chunk_size)
+        or      a
+        sbc     hl,de
+        ld      (qcp_remaining),hl
+        jp      qcpx_copy_loop
+qcpx_copy_done:
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        ret
+
+; The complete-page Quarth image has a one-byte load image at file offset
+; 20H and the QCPX descriptor immediately after it at 21H.  Probe that
+; descriptor without using the normal KSSX extra-data arithmetic: QCPX is a
+; deliberately self-describing container and is materialized by the DOS2
+; player rather than copied as one conventional KSS image.
+probe_qcpx:
+        xor     a
+        ld      (qcp_format),a
+        ld      a,(header+2)
+        cp      'S'
+        ret     nz
+        ld      a,(RUNTIME_STAGE_TABLE)
+        call    PUT_P1_DISPATCH
+        ld      a,(0x4021)
+        cp      'Q'
+        jr      nz,probe_qcpx_restore
+        ld      a,(0x4022)
+        cp      'C'
+        jr      nz,probe_qcpx_restore
+        ld      a,(0x4023)
+        cp      'P'
+        jr      nz,probe_qcpx_restore
+        ld      a,(0x4024)
+        cp      'X'
+        jr      nz,probe_qcpx_restore
+        ld      a,1
+        ld      (qcp_format),a
+probe_qcpx_restore:
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        ret
 
 player_end:

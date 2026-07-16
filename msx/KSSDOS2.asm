@@ -1,9 +1,13 @@
 ; MSX-DOS2 raw KSS/KSSX player loader.
 ;
-; The build script appends the existing C000H KSS player as PLAYER_BLOB.
+; The build script appends a temporary C000H bootstrap and a second
+; page-1-resident Quarth runtime blob.
 ; This COM program opens the user-supplied file through MSX-DOS2, allocates
-; primary mapper segments 4 through 15 plus the staging area, reads the raw
-; file into segments 16 onward, and then transfers control to the player.
+; primary mapper segments with ALL_SEG, reads the raw file into allocated
+; staging segments, and then transfers control to the resident player. The
+; player. For Quarth the bootstrap copies the second blob to the free tail
+; of the engine's page-1 image before playback starts; other engines retain
+; the legacy page-3 runtime path.
 ;
 ; Usage: KSSPLAY.COM FILE.KSS [SONG]
 
@@ -26,18 +30,32 @@ KSS_SONG:       equ     0x7FF7
 ; Keep the fixed KSS/player banks 7..11 and 14..15 inside a 256K mapper.
 ; The raw file staging area therefore starts at 12.
 STAGE_BANK:     equ     12
-ALLOC_END_SEG:  equ     16
-FIRST_USER_SEG: equ     4
 HEADER_BUFFER:  equ     0x8000
 
-PLAYER_RUNTIME_CONFIG: equ 0xDFE0
-PLAYER_RUNTIME_BANK:   equ PLAYER_RUNTIME_CONFIG
-PLAYER_RUNTIME_STAGE:  equ PLAYER_RUNTIME_CONFIG+1
+PLAYER_RUNTIME_CONFIG: equ 0xC960
+PLAYER_RUNTIME_STAGE:  equ PLAYER_RUNTIME_CONFIG
 PLAYER_RUNTIME_MAIN:   equ PLAYER_RUNTIME_STAGE+32
 PLAYER_RUNTIME_BASIC1: equ PLAYER_RUNTIME_MAIN+4
 PLAYER_RUNTIME_BASIC2: equ PLAYER_RUNTIME_BASIC1+1
 PLAYER_RUNTIME_KSS:    equ PLAYER_RUNTIME_BASIC2+1
-PLAYER_RUNTIME_PAGE2_RESTORE: equ PLAYER_RUNTIME_KSS+32
+PLAYER_RUNTIME_ORIGINAL_P2: equ PLAYER_RUNTIME_KSS+32
+PLAYER_RUNTIME_PUT_P0: equ PLAYER_RUNTIME_ORIGINAL_P2+1
+PLAYER_RUNTIME_PUT_P1: equ PLAYER_RUNTIME_PUT_P0+2
+PLAYER_RUNTIME_PUT_P2: equ PLAYER_RUNTIME_PUT_P1+2
+PLAYER_RUNTIME_STACK_TOP: equ PLAYER_RUNTIME_PUT_P2+2
+PLAYER_RUNTIME_BLOB_SOURCE: equ 0xC9AF
+PLAYER_RUNTIME_BLOB_SIZE:   equ 0xC9B1
+PLAYER_RUNTIME_BASE:        equ 0x52E4
+PLAYER_RUNTIME_CONFIG_TARGET: equ 0x5C47
+PLAYER_RUNTIME_ENTRY:       equ 0x52F7
+; These bytes are in the unused fixed page-3 tail of the bootstrap.  The
+; optional fourth command-line argument selects the SCC slot ID (decimal).
+PLAYER_RUNTIME_SCC_SLOT:       equ 0xD2F0
+PLAYER_RUNTIME_SCC_SLOT_VALID: equ 0xD2F1
+PLAYER_RUNTIME_SCC_SLOT_TARGET:       equ 0x6232
+PLAYER_RUNTIME_SCC_SLOT_VALID_TARGET: equ 0x6233
+SCC_SLOT_DEFAULT: equ 0x02
+SCC_SLOT_MAGIC:   equ 0xA5
 
 start:
         call    parse_command_line
@@ -108,7 +126,10 @@ start:
         ; Read directly into the loader's TPA header buffer.  This avoids
         ; depending on the current page-2 mapping before staging is set up.
         ld      de,header
-        ld      hl,0x20
+        ; Read five bytes beyond the fixed KSSX header as a cheap QCPX
+        ; signature probe.  The complete-page format starts with its one-byte
+        ; load image at 20H and "QCPX" at 21H.
+        ld      hl,0x25
         ld      c,READ
         call    BDOS
         jp      nz,dos_error
@@ -154,10 +175,6 @@ start:
         jp      c,mapper_error
         ld      de,msg_alloc
         call    print_text
-        ld      de,msg_alloc_player
-        call    print_text
-        ld      a,(player_segment)
-        call    print_hex_a
         ld      de,msg_alloc_stage
         call    print_text
         ld      a,(stage_segments)
@@ -196,8 +213,14 @@ start:
         call    BDOS
         jp      nz,dos_error
 
+        ; QCPX is already a complete 16K-page container. Never pass it
+        ; through the legacy F-1 Spirit 8K selector patcher.
+        ld      a,(qcpx_file)
+        or      a
+        jr      nz,patch_file_done
         call    patch_f1_if_needed
         jp      c,format_error
+patch_file_done:
         ld      de,msg_07
         call    print_text
         ld      de,msg_loaded
@@ -218,15 +241,17 @@ start:
         ld      (KSS_SONG),a
         ld      a,1
         ld      (KSS_STATE),a
-        ld      hl,player_blob
+        ld      a,(scc_slot)
+        ld      (PLAYER_RUNTIME_SCC_SLOT),a
+        ld      a,SCC_SLOT_MAGIC
+        ld      (PLAYER_RUNTIME_SCC_SLOT_VALID),a
+        ld      hl,player_boot_blob
         ld      de,0xC000
-        ld      bc,player_blob_end-player_blob
+        ld      bc,player_boot_blob_end-player_boot_blob
         ldir
 
-        ; Install the dynamic mapper layout in the copied player.  The
-        ; player relocates this whole image to its allocated segment next.
-        ld      a,(player_segment)
-        ld      (PLAYER_RUNTIME_BANK),a
+        ; Install the dynamic mapper layout in the bootstrap config. The
+        ; Quarth bootstrap later copies this block into the page-1 runtime.
         ld      hl,stage_segments
         ld      de,PLAYER_RUNTIME_STAGE
         ld      bc,32
@@ -243,33 +268,48 @@ start:
         ld      de,PLAYER_RUNTIME_KSS
         ld      bc,32
         ldir
-        ld      a,(declared_banks)
-        or      a
-        jr      z,restore_main_page2
-        ld      a,(kss_segments)
-        jr      store_page2_restore
-restore_main_page2:
         ld      a,(main_segments+2)
-store_page2_restore:
-        ld      (PLAYER_RUNTIME_PAGE2_RESTORE),a
+        ld      (PLAYER_RUNTIME_ORIGINAL_P2),a
+        ld      hl,(0x0006)
+        ld      (PLAYER_RUNTIME_STACK_TOP),hl
+        ld      hl,(mapper_calls)
+        ld      de,0x18          ; DOS2 PUT_P0
+        add     hl,de
+        ld      (PLAYER_RUNTIME_PUT_P0),hl
+        ld      hl,(mapper_calls)
+        ld      de,0x1E          ; DOS2 PUT_P1
+        add     hl,de
+        ld      (PLAYER_RUNTIME_PUT_P1),hl
+        ld      hl,(mapper_calls)
+        ld      de,0x24          ; DOS2 PUT_P2
+        add     hl,de
+        ld      (PLAYER_RUNTIME_PUT_P2),hl
+        ld      hl,player_runtime_blob
+        ld      (PLAYER_RUNTIME_BLOB_SOURCE),hl
+        ld      hl,player_runtime_blob_end-player_runtime_blob
+        ld      (PLAYER_RUNTIME_BLOB_SIZE),hl
         jp      0xC000
 
 ; Parse the first command-line token into filename and an optional decimal
 ; song number.  MSX-DOS places the tail length at 80H and text at 81H.
 parse_command_line:
+        ld      a,SCC_SLOT_DEFAULT
+        ld      (scc_slot),a
+        xor     a
+        ld      (song_number),a
         ld      hl,0x0081
         ld      a,(0x0080)
         ld      b,a
 parse_skip:
         ld      a,b
         or      a
-        jr      z,parse_bad
+        jp      z,parse_bad
         ld      a,(hl)
         cp      ' '
         jr      nz,parse_name
         inc     hl
         djnz    parse_skip
-        jr      parse_bad
+        jp      parse_bad
 parse_name:
         ld      de,filename
 parse_name_loop:
@@ -290,7 +330,7 @@ parse_name_done:
         ld      (de),a
         ld      a,b
         or      a
-        jr      z,parse_good
+        jp      z,parse_good
 parse_song_skip:
         ld      a,(hl)
         cp      ' '
@@ -304,12 +344,12 @@ parse_song_start:
 parse_song_loop:
         ld      a,b
         or      a
-        jr      z,parse_good
+        jr      z,parse_scc_slot_skip
         ld      a,(hl)
         cp      '0'
-        jr      c,parse_good
+        jr      c,parse_bad
         cp      '9'+1
-        jr      nc,parse_good
+        jr      nc,parse_bad
         sub     '0'
         ld      c,a
         ld      a,(song_number)
@@ -322,6 +362,62 @@ parse_song_loop:
         ld      (song_number),a
         inc     hl
         djnz    parse_song_loop
+parse_scc_slot_skip:
+        ld      a,b
+        or      a
+        jr      z,parse_good
+parse_scc_slot_spaces:
+        ld      a,b
+        or      a
+        jr      z,parse_good
+        ld      a,(hl)
+        cp      ' '
+        cp      13
+        jr      z,parse_good
+        cp      ' '
+        jr      nz,parse_scc_slot_start
+        inc     hl
+        djnz    parse_scc_slot_spaces
+        jr      parse_good
+parse_scc_slot_start:
+        xor     a
+        ld      (scc_slot),a
+parse_scc_slot_loop:
+        ld      a,b
+        or      a
+        jr      z,parse_scc_slot_done
+        ld      a,(hl)
+        cp      ' '
+        jr      z,parse_scc_slot_done
+        cp      9
+        jr      z,parse_scc_slot_done
+        cp      13
+        jr      z,parse_scc_slot_done
+        cp      '0'
+        jr      c,parse_bad
+        cp      '9'+1
+        jr      nc,parse_bad
+        sub     '0'
+        ld      c,a
+        ld      a,(scc_slot)
+        add     a,a
+        ld      d,a
+        add     a,a
+        add     a,a
+        add     a,d
+        add     a,c
+        ld      (scc_slot),a
+        inc     hl
+        djnz    parse_scc_slot_loop
+parse_scc_slot_done:
+        ld      a,(scc_slot)
+        cp      4
+        jr      c,parse_good
+        and     0x80
+        jr      z,parse_bad
+        ld      a,(scc_slot)
+        and     0x70
+        jr      nz,parse_bad
 parse_good:
         or      a
         ret
@@ -374,10 +470,6 @@ capture_tpa_segments:
 ; two for raw staging, one for the relocated player, and one for F-1 banked
 ; data.
 allocate_fixed_segments:
-        ld      ix,player_segment
-        ld      c,1
-        call    allocate_list
-        ret     c
         ld      ix,stage_segments
         ld      a,(stage_count)
         ld      c,a
@@ -458,12 +550,15 @@ inspect_magic_ok:
         ld      a,(header+0x0D)
         and     0x7F
         ld      (declared_banks),a
+        cp      33
+        jr      nc,inspect_bad_bank_count
         ld      a,(header+0x0C)
         ld      c,a
         ld      a,(declared_banks)
         add     a,c
         jr      c,inspect_bad
         ld      (bank_end),a
+        call    probe_qcpx_header
         or      a
         ret
 inspect_8k:
@@ -508,9 +603,38 @@ inspect_bad_8k_load_hi:
         jr      inspect_bad_kind
 inspect_bad_8k_load_lo:
         ld      a,5
+        jr      inspect_bad_kind
+inspect_bad_bank_count:
+        ld      a,6
 inspect_bad_kind:
         ld      (error_kind),a
         scf
+        ret
+
+probe_qcpx_header:
+        xor     a
+        ld      (qcpx_file),a
+        ld      a,(header+2)
+        cp      'S'
+        ret     nz
+        ld      a,(header+0x21)
+        cp      'Q'
+        ret     nz
+        ld      a,(header+0x22)
+        cp      'C'
+        ret     nz
+        ld      a,(header+0x23)
+        cp      'P'
+        ret     nz
+        ld      a,(header+0x24)
+        cp      'X'
+        ret     nz
+        ld      a,1
+        ld      (qcpx_file),a
+        ; The five logical pages are records in one container.  Native MSX
+        ; playback materializes only the selected record, so one physical
+        ; mapper segment is sufficient.
+        ld      (declared_banks),a
         ret
 
 calculate_stage_count:
@@ -535,6 +659,8 @@ calculate_stage_count:
         add     a,a
         add     a,c
         jr      z,calculate_bad
+        cp      33
+        jr      nc,calculate_bad
         ld      (stage_count),a
         add     a,STAGE_BANK
         jr      c,calculate_bad
@@ -746,6 +872,8 @@ format_error:
         jr      z,format_bad_8k_load_hi
         cp      5
         jr      z,format_bad_8k_load_lo
+        cp      6
+        jr      z,format_bad_bank_count
         ld      de,msg_format
         jr      print_and_exit
 format_bad_magic:
@@ -762,6 +890,9 @@ format_bad_8k_load_hi:
         jr      print_and_exit
 format_bad_8k_load_lo:
         ld      de,msg_bad_8k_load_lo
+        jr      print_and_exit
+format_bad_bank_count:
+        ld      de,msg_bad_bank_count
         jr      print_and_exit
 file_too_large:
         ld      de,msg_large
@@ -799,7 +930,7 @@ terminate_error:
         jp      BDOS
 
 msg_usage:
-        defm    "KSSPLAY.COM FILE.KSS [SONG]$"
+        defm    "KSSPLAY.COM FILE.KSS [SONG] [SCC_SLOT_DECIMAL]$"
 msg_01:
         defm    13,10,"01 PARSED"
 msg_01_end:
@@ -833,8 +964,6 @@ msg_05a:
         defm    " STAGECOUNT=$"
 msg_alloc:
         defm    13,10,"ALLOC$"
-msg_alloc_player:
-        defm    " P=$"
 msg_alloc_stage:
         defm    " S=$"
 msg_alloc_kss:
@@ -867,6 +996,8 @@ msg_bad_8k_load_hi:
         defm    "F1 load address high byte is not 5FH$"
 msg_bad_8k_load_lo:
         defm    "F1 load address low byte is not zero$"
+msg_bad_bank_count:
+        defm    "KSS declares more than 32 banks$"
 msg_large:
         defm    "KSS file is too large for mapper staging$"
 msg_mapper:
@@ -894,12 +1025,12 @@ f1_new_rst:
         defb    0xF7,0x00,0x00
 f1_new_rst_b000:
         defb    0xEF,0x00,0x00
-
 filename:       defs    64,0
-header:         defs    0x20,0
+header:         defs    0x30,0
 hex_buffer:     defs    2,0
 file_handle:    defb    0
 song_number:    defb    0
+scc_slot:       defb    SCC_SLOT_DEFAULT
 file_size:      defs    3,0
 stage_count:    defb    0
 stage_index:    defb    0
@@ -907,14 +1038,17 @@ declared_banks: defb    0
 bank_end:       defb    0
 error_kind:     defb    0
 patch_f1:       defb    0
+qcpx_file:      defb    0
 mapper_calls:   defw    0
 mapper_free:    defb    0
 mapper_total:   defb    0
-player_segment: defb    0
 stage_segments: defs    32,0
 kss_segments:   defs    32,0
 main_segments:  defs    4,0
 
-player_blob:
+player_boot_blob:
         incbin  'KSSDOS2_PLAYER.raw'
-player_blob_end:
+player_boot_blob_end:
+player_runtime_blob:
+        incbin  'KSSDOS2_RUNTIME.raw'
+player_runtime_blob_end:

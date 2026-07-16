@@ -17,6 +17,13 @@ The supported song set is read from Quarth's trackinfo file.  Other internal
 sound-effect IDs are intentionally not packed; the input is rejected if a
 trackinfo ID is outside the supported Quarth music set or its descriptor no
 longer fits its assigned bank.
+
+The relocated wrapper follows the shared engine/player contract used by the
+MSX player: ENGINE_INIT and ENGINE_PLAY are ordinary callable entry points,
+ENGINE_STOP is a safe no-op entry point, and ENGINE_MAP_DATA is a logical map
+request through the user-reserved RST 28H gateway. The wrapper puts the
+logical bank number in A and does not emit a physical mapper segment number.
+The player owns the mapping.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ COMMON_END = 0x6573
 
 TAIL_SOURCE_START = 0xB800
 TAIL_HELPER_END = 0xB817
+ENGINE_MAP_DATA = 0x0028  # Player-installed logical map request gateway.
 
 # Track 14's last stream starts at the same address as track 15's first
 # stream.  Both self-contained banks therefore retain the overlapping stream
@@ -366,15 +374,17 @@ def make_tail(image: bytes) -> tuple[bytes, int, int, int]:
 
     # The init wrapper first gives the original init routine a known bank,
     # then selects the song's bank, and finally calls the original selector
-    # with the original A value restored.
+    # with the original A value restored. RST 28H is ENGINE_MAP_DATA: it is a
+    # logical request, not a physical mapper write. Keep one NOP after RST so
+    # the replacement is the same width as OUT (FEH),A.
     selector_address = init_address + 19
     init = bytearray(
         (
             0xF5,  # PUSH AF: preserve the original init argument
             0xF5,  # PUSH AF: preserve it while selecting the common bank
-            0xAF,  # XOR A
-            0xD3,
-            0xFE,  # OUT (FEH),A: select bank 0 for original INIT
+            0xAF,  # XOR A: request logical bank 0
+            0xEF,
+            0x00,  # RST 28H / NOP: ENGINE_MAP_DATA
             0xF1,  # POP AF: original init sees the original song argument
             0xCD,
             0x00,
@@ -413,14 +423,14 @@ def make_tail(image: bytes) -> tuple[bytes, int, int, int]:
             0x38,
             relative_jump(selector_address + 6, bank1_address),
             0xAF,
-            0xD3,
-            0xFE,
-            0xC9,  # bank 0 for IDs >=22
+            0xEF,
+            0x00,
+            0xC9,  # logical bank 0 for IDs >=22
             0x3E,
             0x01,
-            0xD3,
-            0xFE,
-            0xC9,  # bank 1 for IDs 15..21
+            0xEF,
+            0x00,
+            0xC9,  # logical bank 1 for IDs 15..21
         )
     )
     if len(selector) != 17:
@@ -428,8 +438,9 @@ def make_tail(image: bytes) -> tuple[bytes, int, int, int]:
 
     play_address = init_address + len(init) + len(selector)
     play = bytes((0xCD, 0x06, 0x40, 0xC9))
+    stop = bytes((0xC9,))
 
-    tail = bytes(helper) + bytes(init) + bytes(selector) + play
+    tail = bytes(helper) + bytes(init) + bytes(selector) + play + stop
     return tail, helper_address, init_address, play_address
 
 

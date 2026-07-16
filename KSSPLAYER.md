@@ -41,4 +41,18 @@ Useful options include `--mwk FILE` to override the embedded samplepack,
 `--channels 2`, `--quality 0`, `--loops 0` to disable loop-triggered fading,
 and `--info` to inspect the KSP/KSS metadata without opening audio.
 
+For banked KSS testing, `--mapper-base N` places logical bank 0 at physical
+mapper segment N. Subsequent logical banks use subsequent physical segments.
+This exercises the same logical-to-physical mapping contract used by the MSX
+player; the engine must request a logical bank and must not choose the
+physical segment itself. For example:
+
+    SDL_AUDIODRIVER=dummy ./build/kssplayer --mapper-base 9 \
+      --song 0 --seconds 10 /path/to/quarth_16k.kss
+
+`quarth_16k_complete_page.kss` is also supported. Its QCPX materializer
+builds each complete engine+music page once and maps the selected logical page
+into the `4000H..7FFFH` window, so `--mapper-base` still selects the physical
+segment range without requiring duplicate engine bytes in the file.
+
 While playing, press Escape or Ctrl-C to stop early. The player restores the terminal mode before returning to the shell.

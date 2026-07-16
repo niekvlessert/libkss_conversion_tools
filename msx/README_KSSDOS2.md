@@ -25,11 +25,11 @@ prints `KSS LOADED`. The input file is never modified. The verified F-1 Spirit
 8K-bank layout is adapted in the staged RAM copy; other generic 8K-bank KSS
 files are still rejected.
 
-The loader reserves the fixed player layout used by the machine-code player:
-segments 7–11 for the player and materialized main memory, and segments 16
-onward for the raw-file staging area. It therefore needs a contiguous primary
-mapper with enough free segments. A 512 KiB primary mapper is recommended for
-the included banked test files; 128 KiB is not enough for this fixed layout.
+The loader keeps the player and its mapper handlers in the fixed page-3 TPA
+area. It allocates only staging segments and logical KSS data segments with
+`ALL_SEG`; page 3 is never mapped to an allocated player segment. The resident
+area is below the DOS-resident boundary and outside the runtime stack. A
+512 KiB primary mapper is recommended for the included banked test files.
 
 The player supports ordinary KSCC/KSSX files and uncompressed 16K banked data
 whose declared bank range does not overlap the player/main/staging ranges. The
@@ -45,3 +45,68 @@ python3 tools/build_msx_dos2_kss.py
 The COM uses MSX-DOS2 function calls 43H/48H/4AH/45H for open/read/seek/close
 and the DOS2 extended-BIOS mapper support routines for primary-segment
 allocation and page-2 mapping.
+
+### Logical mapper contract
+
+The MSX player owns physical mapper placement. It allocates staging and KSS
+data segments at runtime, stores their physical segment numbers in a
+logical-to-physical table, and translates the engine's bank requests before
+changing the page-2 mapper. A relocated engine must expose:
+
+ENGINE_INIT
+ENGINE_PLAY
+ENGINE_STOP
+ENGINE_MAP_DATA
+
+ENGINE_MAP_DATA is a logical request. The engine supplies the logical bank
+number in A and enters through the player-installed user RST 28H gateway; it
+must not write a physical segment number directly to mapper port FEH. The
+player saves and patches the four bytes at 0028H, then restores them on stop.
+The gateway and its handlers are in fixed page-3 TPA memory, so neither the
+patched RST instruction nor its return address is in page 2.
+
+The loader obtains the original page-2 segment with DOS2 `GET_P2` before any
+playback setup. Every runtime mapper change uses the corresponding DOS2
+`PUT_P0`, `PUT_P1`, or `PUT_P2` entrypoint. `PUT_P2` changes the mapper
+segment and DOS2 shadow state, but it does not select the mapper RAM slot;
+the player selects the RAM slot separately before calling it.
+
+The uncompressed Quarth test image uses this contract. Rebuild the COM and
+copy it and the raw image to the MSX-DOS2 disk, then run:
+
+    python3 tools/build_msx_dos2_kss.py
+    KSSPLAY.COM QUARTH.KSS 0
+    KSSPLAY.COM QUARTH.KSS 15
+
+The two commands exercise Quarth's bank-0 and bank-1 songs while the physical
+segments are chosen by the loader. The current generic COM materializes raw
+KSS/KSSX bank data; the private QRTX compression used by
+quarth_16kb_max_compressed.kss is supported by the desktop libkss player but
+still needs a corresponding MSX decompression/materialization path.
+
+### Important native-player limits
+
+The physical segment numbers are not KSS bank numbers. ALL_SEG allocates
+whatever physical segments DOS2 can provide; the loader records those IDs in
+the logical-to-physical table. Runtime page-1/page-2 changes go through the
+DOS2 PUT_P1/PUT_P2 entrypoints passed into the resident player. A trace
+therefore shows the physical mapper write inside the DOS2 mapper routine, not
+in the Quarth engine or its logical bank handler.
+
+This is a specialized native adapter, not a generic DOS2 KSS executor. It
+does not relocate arbitrary engines safely, does not support general 8K KSS
+windows, and does not support the private QRTX compressed Quarth format.
+The QCPX Quarth path keeps its engine, selected tracks, and relocated writable
+work area together in mapper-RAM page 1. Page 2 remains selected to the real
+SCC cartridge for INIT and PLAY. The player selects the configured SCC slot
+and enables the register window with a `3FH` write to `9000H`; the adapted
+engine no longer performs its original `FFFDH`/`FFFEH` slot-shadow writes.
+The bootstrap SCC handoff is stored at `D2F0H/D2F1H`, outside both the
+bootstrap code and the `D300H` materialization scratch buffer.
+
+The four-item interface is the target contract for adapted engines. The
+current KSSPLAY.COM test program uses fixed page-3 TPA residency and has a
+resident stop routine that restores the RST 28H vector, H.TIMI, page 1, and
+the original page-2 segment. A user-facing STOP/free-segments/DOS-return path
+still needs to call that routine before treating it as a finished DOS2
+application.

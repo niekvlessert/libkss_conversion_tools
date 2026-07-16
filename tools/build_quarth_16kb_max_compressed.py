@@ -6,7 +6,8 @@ the relocated engine and a small song-ID bootstrap in the KSS load image,
 compresses the engine with ZX0, and stores a private QRTX tail containing one
 compressed copy of the shared bank prefix plus the two bank-specific data
 regions. The libkss player reconstructs the normal two-bank image before the
-Z80 starts, so Quarth's runtime bank selectors remain unchanged.
+Z80 starts. The engine's bank selectors remain logical ENGINE_MAP_DATA
+requests; the player chooses the physical mapper segments.
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ import argparse
 from pathlib import Path
 import struct
 import subprocess
-import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 HEADER_SIZE = 0x20
@@ -199,11 +202,12 @@ def validate_source(source_data: bytes) -> tuple[bytes, bytes, bytes, bytes]:
     header = source_data[:SOURCE_HEADER_SIZE]
     if (
         get_word(header, 4),
-        get_word(header, 6),
         get_word(header, 8),
         get_word(header, 10),
-    ) != (0x4000, 0x12E3, ENGINE_INIT_ADDRESS, PLAY_ADDRESS):
+    ) != (0x4000, ENGINE_INIT_ADDRESS, PLAY_ADDRESS):
         raise ValueError("source is not the expected Quarth 16K image")
+    if get_word(header, 6) < 0x12E3 or get_word(header, 6) > 0x12E4:
+        raise ValueError("source has an unexpected Quarth load size")
     if header[0x0C] != BANK_OFFSET or header[0x0D] != BANK_COUNT:
         raise ValueError("source must contain two 16K Quarth banks at offset 0")
 
@@ -227,20 +231,20 @@ def build(source: Path, trackinfo: Path, destination: Path, packer: Path) -> Non
     engine, common, bank0_data, bank1_data = validate_source(source_data)
     tracks = parse_trackinfo(trackinfo)
 
-    with tempfile.TemporaryDirectory(prefix="quarth-zx0-") as temporary:
-        work = Path(temporary)
-        inputs = {
-            "engine": engine,
-            "common": common,
-            "bank0": bank0_data,
-            "bank1": bank1_data,
-        }
-        compressed = {}
-        for name, raw in inputs.items():
-            raw_path = work / f"{name}.raw"
-            zx0_path = work / f"{name}.zx0"
-            raw_path.write_bytes(raw)
-            compressed[name] = compress(packer, raw_path, zx0_path)
+    work = ROOT / "tmp" / "quarth-zx0-build"
+    work.mkdir(parents=True, exist_ok=True)
+    inputs = {
+        "engine": engine,
+        "common": common,
+        "bank0": bank0_data,
+        "bank1": bank1_data,
+    }
+    compressed = {}
+    for name, raw in inputs.items():
+        raw_path = work / f"{name}.raw"
+        zx0_path = work / f"{name}.zx0"
+        raw_path.write_bytes(raw)
+        compressed[name] = compress(packer, raw_path, zx0_path)
 
     # The bootstrap maps KSSX song indices 0..18 back to Quarth's original
     # compact descriptor IDs before entering the relocated Quarth INIT.
@@ -275,8 +279,9 @@ def build(source: Path, trackinfo: Path, destination: Path, packer: Path) -> Non
         raise ValueError("compressed Quarth load image does not fit in MSX memory")
 
     # QRTX: compressed common prefix, followed by the used data portions of
-    # physical bank 0 and bank 1. The player restores the omitted zero padding
-    # and copies the common prefix into both 16K banks.
+    # logical bank 0 and logical bank 1. The player restores the omitted zero
+    # padding and materializes both maps in whichever physical mapper segments
+    # it allocated; the engine only requests logical bank numbers.
     compressed_tail = (
         QRTX_HEADER
         + struct.pack(
