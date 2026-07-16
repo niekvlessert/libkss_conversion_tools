@@ -11,12 +11,14 @@ BIOS_RDSLT:       equ     0x000C
 BIOS_ENASLT:      equ     0x0024
 BIOS_CHGET:       equ     0x009F
 BIOS_CHPUT:       equ     0x00A2
+BIOS_SNSMAT:      equ     0x0141
 BIOS_RAMAD1:      equ     0xF342
 BIOS_RAMAD2:      equ     0xF343
 KSS_INIT:         equ     0x7F30
 KSS_PLAY:         equ     0x45E5
 ZX0_DECODER:      equ     0xCF00
 STACK_TOP:        equ     0xF300
+BASIC_TRACK:      equ     0xBFFF
 ENGINE_SCRATCH:   equ     0x8000
 SONG_SCRATCH:     equ     0xD000
 
@@ -28,27 +30,17 @@ ENGINE_SECOND_LEN:equ     0x04AC
 start:
         im      1
         ld      sp,STACK_TOP
-        ei
-        ld      hl,msg_menu
-        call    print_string
-
-select_track:
-        call    BIOS_CHGET
-        cp      '1'
-        jr      c,select_track
-        cp      '6'
-        jr      nc,select_track
-        push    af
-        call    BIOS_CHPUT
-        pop     af
-        sub     '1'
+        ld      a,(BASIC_TRACK)
+        cp      5
+        jr      c,selected_track_valid
+        xor     a
+selected_track_valid:
         ld      (selected_track),a
-        ld      a,13
-        call    BIOS_CHPUT
-        ld      a,10
-        call    BIOS_CHPUT
+        ei
         ld      hl,msg_loading
         call    print_string
+
+load_selected_track:
         di
 
         ; The mapper cartridge occupies page 2 after boot.  Select main RAM
@@ -59,7 +51,8 @@ select_track:
 
         call    find_data_cartridge
         jp      c,hang
-        ld      (cart_slot),a
+        ld      (switch_cart_slot),a
+cartridge_ready:
 
         ; Copy and decode the shared engine.
         call    map_cartridge_page1
@@ -80,6 +73,7 @@ select_track:
         call    ZX0_DECODER
 
         ; Load the selected SONG table entry into working variables.
+load_selected_song:
         ld      a,(selected_track)
         ld      hl,song_table
         or      a
@@ -119,7 +113,7 @@ song_entry_ready:
         ld      hl,SONG_SCRATCH
         ld      de,0x8000
         call    ZX0_DECODER
-        call    compact_mwm
+        call    compact_selected_mwm
 
         ; Install the compact-KSP MBWave bootstrap and libkss compatibility
         ; shims used by the proven single-track player.
@@ -182,6 +176,33 @@ copy_banked_rom_loop:
 
 ; Convert a decompressed runtime MWM at 8000H to MBWave's flat pattern form.
 ; This is the Z80 equivalent of ksp_compact_mwm().
+compact_selected_mwm:
+        ld      a,(selected_track)
+        ld      hl,compact_table
+        or      a
+        jr      z,compact_entry_ready
+        ld      b,a
+        ld      de,6
+compact_entry_step:
+        add     hl,de
+        djnz    compact_entry_step
+compact_entry_ready:
+        ld      c,(hl)
+        inc     hl
+        ld      b,(hl)
+        inc     hl
+        push    bc
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      c,(hl)
+        inc     hl
+        ld      b,(hl)
+        pop     hl
+        ldir
+        ret
+
 compact_mwm:
         ld      a,(0x8006)         ; song length
         inc     a                  ; position count
@@ -281,7 +302,7 @@ next_slot:
         ret
 
 map_cartridge_page1:
-        ld      a,(cart_slot)
+        ld      a,(switch_cart_slot)
         ld      h,0x40
         jp      BIOS_ENASLT
 
@@ -342,6 +363,16 @@ song_table:
         defb    13
         defw    0x5F8A,0x110C,0x25C4       ; 5 CLIMAX
 
+; source, destination, length after the MWM has been decoded at 8000H.
+; Every song in this five-track ROM has one pattern block, so one overlapping
+; forward LDIR removes its three-byte block header and preserves its tail.
+compact_table:
+        defw    0x81B8,0x81B5,0x2E01       ; 1 ALMOSEND
+        defw    0x81F7,0x81F4,0x348E       ; 2 ANGEL_01
+        defw    0x81F4,0x81F1,0x2D7D       ; 3 ANGEL_06
+        defw    0x823C,0x8239,0x3199       ; 4 ANGEL_09
+        defw    0x81F7,0x81F4,0x23CD       ; 5 CLIMAX
+
 msg_menu:
         defm    13,10,"DMV ROM MOONSOUND PLAYER",13,10
         defm    "1 ALMOSEND",13,10
@@ -371,6 +402,136 @@ song_source:
         defw    0
 song_packed_size:
         defw    0
+switch_cart_slot:
+        defb    0
 
         defs    ZX0_DECODER-$,0
         incbin  '@@DZX0@@'
+
+; Runtime switching extension.  Keep this after the proven CF00H decoder so
+; adding controls does not relocate any engine/bootstrap material below it.
+play_and_controls:
+        call    KSS_PLAY
+        call    read_escape
+        jp      z,control_escape
+        call    read_track_key
+        ret     nc
+        push    af
+        call    stop_moonsound
+        call    restore_hkeyi
+        call    wait_track_release
+        pop     af
+        ld      (selected_track),a
+        xor     a
+        ld      (0x4535),a         ; NOP MBPLAY's EI on restart
+        jp      load_selected_song
+
+control_escape:
+        call    stop_moonsound
+        call    restore_hkeyi
+        call    wait_escape_release
+control_wait_track:
+        call    read_track_key
+        jr      nc,control_wait_track
+        push    af
+        call    wait_track_release
+        pop     af
+        ld      (selected_track),a
+        xor     a
+        ld      (0x4535),a
+        jp      load_selected_song
+
+read_escape:
+        ld      a,7
+        call    BIOS_SNSMAT
+        bit     2,a
+        ret
+
+wait_escape_release:
+wait_escape_release_loop:
+        ld      a,7
+        call    BIOS_SNSMAT
+        bit     2,a
+        jr      z,wait_escape_release_loop
+        ret
+
+read_track_key:
+        xor     a
+        call    BIOS_SNSMAT
+        cpl
+        and     0x3E
+        ld      e,a
+        ld      a,e
+        or      a
+        ret     z
+        srl     a
+        ld      b,5
+        ld      c,0
+read_track_key_loop:
+        rrca
+        jr      c,read_track_key_found
+        inc     c
+        djnz    read_track_key_loop
+        or      a
+        ret
+read_track_key_found:
+        ld      a,c
+        scf
+        ret
+
+wait_track_release:
+wait_track_release_loop:
+        xor     a
+        call    BIOS_SNSMAT
+        and     0x3E
+        cp      0x3E
+        jr      nz,wait_track_release_loop
+        ret
+
+restore_hkeyi:
+        ld      a,0xC9
+        ld      hl,0xFD9A
+        ld      b,5
+restore_hkeyi_loop:
+        ld      (hl),a
+        inc     hl
+        djnz    restore_hkeyi_loop
+        ret
+
+stop_moonsound:
+        ld      a,4
+        out     (0xC0),a
+        ld      a,0x80
+        out     (0xC1),a
+        ld      a,4
+        out     (0xC0),a
+        ld      a,0x60
+        out     (0xC1),a
+        ld      d,0xB0
+        ld      b,9
+stop_fm0:
+        ld      a,d
+        out     (0xC0),a
+        xor     a
+        out     (0xC1),a
+        inc     d
+        djnz    stop_fm0
+        ld      d,0xB0
+        ld      b,9
+stop_fm1:
+        ld      a,d
+        out     (0xC2),a
+        xor     a
+        out     (0xC3),a
+        inc     d
+        djnz    stop_fm1
+        ld      d,0x68
+        ld      b,24
+stop_wave:
+        ld      a,d
+        out     (0xC4),a
+        xor     a
+        out     (0xC5),a
+        inc     d
+        djnz    stop_wave
+        ret

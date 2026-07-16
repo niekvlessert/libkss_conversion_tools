@@ -1,0 +1,265 @@
+# Konami KSS conversion playbook
+
+This is the handoff document for separating Konami music engines from their
+music data and rebuilding the result as banked KSS. It records the Quarth
+engine analysis and the workflow that should be reused for F-1 Spirit,
+Nemesis, and the other Konami packs.
+
+## Why a raw banked KSS can be larger
+
+The standard KSCC header is only 16 bytes. The important storage rule is that
+raw bank data is not variable-sized: every declared 16K bank occupies exactly
+`0x4000` bytes after the initial load image. Byte `0x0D` contains the bank
+count; its high bit selects 8K mode, and a clear high bit selects 16K mode.
+
+Quarth demonstrates the size tradeoff:
+
+| image | initial load | bank payload | header | total |
+|---|---:|---:|---:|---:|
+| original `quarth.kss` | `0x7824` = 30,756 | 0 | 16 | 30,772 |
+| repacked `quarth_16k.kss` | `0x12E3` = 4,835 | `2 * 0x4000` = 32,768 | 16 | 37,619 |
+
+The repacked file is therefore 6,847 bytes larger. That difference is not an
+unexplained KSS trailer:
+
+- The shared Quarth lookup block is `0x12D1` = 4,817 bytes and must exist in
+  both physical banks, because either bank can be mapped at `8000H` while the
+  driver is running.
+- Bank 0 uses `0x3FFA` = 16,378 bytes: the common block, the streams for
+  tracks 3–14, and the small `A0F0H` volume-data dependency. It has 6 padding
+  bytes.
+- Bank 1 uses `0x316D` = 12,653 bytes: the common block and the streams for
+  tracks 15–21. It has 3,731 padding bytes.
+- Tracks 14 and 15 share a stream start at `906DH`; each self-contained bank
+  retains its own copy of the overlapping stream range.
+
+The two banks are necessary for the selected Quarth tracks. A single 16K bank
+cannot hold the common block plus the complete stream ranges for tracks 3–21.
+The original image has no such rounding cost because its engine and music are
+one contiguous 30,756-byte load image.
+
+The raw result can be made smaller later with a KSSX/container-specific
+compression layer. That layer can compress the common block once and omit
+padding, then materialize normal 16K banks before the engine starts. The
+existing `build_nemesis3_16kb_max_compressed.py` does this for Nemesis 3 with a
+custom player-side expansion format. It is a separate optimization from the
+correctness-critical raw bank layout.
+
+## Quarth engine map
+
+The original Quarth KSCC image is:
+
+```text
+load image: 4000H..B824H
+driver core: 4000H..52A4H
+music/common data: 52A4H..B800H
+tail/helper: B800H..B824H
+init: B817H
+play: B820H
+```
+
+The exported `vigamup/extracted/quarth.engine` is a concatenation of the
+driver core and the tail. It is not one naturally contiguous address range:
+the first `0x12A4` bytes belong at `4000H`, and the final `0x24` bytes belong
+at `B800H`. Disassemble those fragments with their real origins when using
+`z80dasm`.
+
+The original entry stubs are:
+
+```text
+4000H -> driver reset/init setup
+4003H -> song selection
+4006H -> play tick
+```
+
+The repacker keeps the core at `4000H`, moves the helper next to it, and
+installs a small wrapper:
+
+```text
+main image: 4000H..52E3H
+relocated helper: 52A4H
+new init: 52BBH
+new play: 52DFH
+bank window: 8000H..BFFFH, selected with OUT (FEH),A
+```
+
+The wrapper selects bank 0 before the original reset code runs, calls the
+original init path with the original song number in `A`, selects the song
+bank, and then calls the original selector. Tracks 3–14 use bank 0; tracks
+15–21 use bank 1.
+
+## Song selection and descriptors
+
+Quarth does not have a 256-entry pointer table. The selector indexes a compact
+word table at `52A2H` as:
+
+```text
+descriptor = word(52A2H + 2 * song_id)
+```
+
+For the real music set, IDs 3–21 point into the compact descriptor area.
+Other entries in this region are internal sound-effect/control descriptors.
+Treating the area as 256 pointers corrupts descriptors and lookup data.
+
+Each descriptor begins with a two-byte header consumed by the selector,
+followed by a variable number of little-endian stream pointers. The descriptor
+ends where the next descriptor in the compact table begins; it is not always
+an eight-pointer record. In the selected set, descriptors contain either six
+or eight stream pointers.
+
+The engine creates eight channel work areas at:
+
+```text
+C400H, C440H, C480H, C4C0H,
+C500H, C540H, C580H, C5C0H
+```
+
+The stream pointer for a channel is at `IX+02/03` when that channel is active.
+The current and target tone periods are maintained around `IX+0C/0D` and
+`IX+11/12`; timing, effect, and mode state occupy the rest of the 40-byte
+channel structure.
+
+## Tone and effect data
+
+Quarth is an event-stream engine, not a PCM player. Stream bytes below `D0H`
+are interpreted as note/timing data. Bytes `D0H` and above dispatch through a
+command pointer table at `4B75H`.
+
+Important relocated tables include:
+
+```text
+5482H, 549AH, 54B2H, 54CAH   four 12-entry effect/voice pointer tables
+5838H                         90-entry frequency lookup pointer table
+64C5H                         sentinel plus 12 pitch/effect pointers
+642AH                         eight-entry volume/envelope pointer table
+```
+
+The entries in the four `54xxH` tables are themselves pointers. Relocating
+only the executable `LD HL,54xxH` operands is insufficient. The same applies
+to the frequency, pitch, and volume pointer tables.
+
+The volume table's first pointer is special: it points at `A0F0H`, which is
+music-side data rather than part of the common lookup block. The Quarth
+repacker copies that dependency into bank 0 and relocates the table entry.
+
+Several high command bytes carry absolute stream addresses. In particular,
+`F9H`, `FCH`, and `FDH` contain little-endian control-flow targets. `FDH` is
+the direct stream jump seen in track 5 as `FD 93 67`; after relocation that
+target must point into the banked copy, not back to `6793H`. `F9H` and `FCH`
+are loop/repeat-related forms that also carry stream targets.
+
+The PSG output path writes register/value pairs through ports `A0H` and `A1H`.
+The game metadata identifies both PSG and SCC, and the driver also performs
+SCC-side memory-mapped output. The first three tone periods follow the normal
+PSG period registers; the remaining channel state and effect processing feed
+the SCC/other output paths. This is why a valid conversion must compare both
+the stream state and the generated chip writes, not merely check that the Z80
+continues executing.
+
+The recovered effect model includes:
+
+- note periods with target-period updates for slides and pitch changes;
+- per-channel timing counters and note lengths;
+- mode/flag commands that switch between ordinary notes and effect streams;
+- lookup-driven pitch and volume/envelope sequences;
+- loop and jump commands embedded directly in the stream data.
+
+## Current Quarth conversion
+
+The implementation is [`tools/repack_quarth_banked.py`](../tools/repack_quarth_banked.py).
+It currently uses:
+
+```text
+common copy:     52A2H..6573H -> 8000H..92D1H in each bank
+bank 0 streams:  6573H..911CH plus A0F0H..A270H
+bank 1 streams:  906DH..AF09H
+required IDs:    vigamup/quarth.trackinfo only
+```
+
+It patches four classes of references:
+
+1. executable absolute references to the compact table and lookup tables;
+2. nested pointers inside common lookup tables;
+3. variable-length descriptor stream pointers;
+4. absolute `F9H/FCH/FDH` stream operands.
+
+The resulting file is [`vigamup/extracted/quarth_16k.kss`](../vigamup/extracted/quarth_16k.kss).
+
+## Quarth compressed output
+
+The maximally compressed build is generated with
+[`tools/build_quarth_16kb_max_compressed.py`](../tools/build_quarth_16kb_max_compressed.py):
+
+```sh
+python3 tools/build_quarth_16kb_max_compressed.py
+```
+
+It writes [`vigamup/extracted/quarth_16kb_max_compressed.kss`](../vigamup/extracted/quarth_16kb_max_compressed.kss).
+The KSSX song IDs are now contiguous `0..18`, mapped in trackinfo order to:
+
+```text
+0..18 -> 5,3,9,10,11,4,12,13,14,6,15,16,17,18,19,20,21,7,8
+```
+
+The companion metadata is
+[`vigamup/quarth_16kb_max_compressed.trackinfo`](../vigamup/quarth_16kb_max_compressed.trackinfo).
+The private `QRTX` tail compresses the engine, one universal common block,
+and two bank-specific data areas. The bundled libkss runtime reconstructs the
+normal two physical 16K banks before playback; this requires the Quarth QRTX
+support in `3rd_party/libkss/src/kssplay.c`, just as the existing compressed
+Nemesis 3 output requires its `N3ZX` support.
+
+The bootstrap itself consumes some Z80 cycles during initialization, so a
+raw write-trace comparison should either exclude that startup interval or
+compare after alignment. The music stream and bank selections remain stable;
+all 19 remapped IDs load and select the expected bank in the short validation
+run.
+
+## Workflow for a fresh AI context
+
+Use this order for a new Konami pack:
+
+1. Read this file and `MERGING_ENGINES_LESSONS.md` before modifying code.
+2. Run `tools/extract_kss_assets.py` and inspect the generated `.txt`,
+   `.engine`, and `.tracks` files. Check whether the music is embedded in the
+   initial load or already in mapper banks.
+3. Treat the `.trackinfo` file as the authoritative real-track set. Do not
+   infer required IDs from every descriptor or from the nominal `0..255`
+   KSS range.
+4. Run `build/kss_track_analyzer <directory> <game>` on the original image to
+   record the bank selectors used by each real track. Long trackinfo durations
+   can make this take minutes; use a shorter trace harness during iteration.
+5. Disassemble the executable portion with `z80dasm`. Find direct absolute
+   references, then inspect the targets: a table target often contains a
+   second layer of pointers.
+6. Build a per-game layout manifest containing the original header, engine
+   segments, common tables, stream ranges, bank groups, and patch sites. Keep
+   the manifest separate from the generic packer.
+7. Pack only the real tracks. Prefer a layout that minimizes duplicated
+   common data while keeping every bank self-contained. Count used bytes and
+   fixed-bank padding before judging the result size.
+8. Patch bank selectors, executable operands, nested pointers, descriptor
+   pointers, and stream control-flow operands. Use signature checks and refuse
+   unexpected input bytes.
+9. Compare original and repacked chip-write traces for every real track. A
+   useful fast fingerprint is the ordered `(register, value)` stream for PSG
+   ports `A0H/A1H`, followed by SCC register/memory writes. Stop at the first
+   divergence and inspect the Z80 state there.
+10. Only after the raw banked image is correct, add optional KSSX compression.
+    The compressed player should materialize exactly the same normal engine
+    image and bank contents before playback.
+
+The reusable tooling should evolve toward three layers:
+
+```text
+generic extractor/analyzer
+        |
+per-game layout manifest and pointer classification
+        |
+small strict per-game repacker + common trace comparator
+```
+
+The difficult part is not copying bytes; it is classifying which words are
+addresses and which words are musical data. A manifest plus an emulation trace
+keeps that judgment explicit and gives an empty context enough evidence to
+continue without rediscovering the whole engine.

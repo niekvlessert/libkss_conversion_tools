@@ -81,6 +81,11 @@ if(KSS_PATCH_OUTPUT)
 endif()
 add_subdirectory(3rd_party/libkss EXCLUDE_FROM_ALL)
 
+# The bundled KSS player materializes the custom compressed Nemesis 3 bank
+# payload before starting the Z80. Reuse the project's checked-in decoder.
+target_sources(kss PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/zx_decompressor.c")
+target_include_directories(kss PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 if(KSP_MOONSOUND_DIR)
   set(KSP_LIBVGM_DIR "${KSP_MOONSOUND_DIR}/src_libvgm")
   target_sources(kss PRIVATE
@@ -177,6 +182,12 @@ endif()
 add_executable(vigamup2rom src/vigamup2rom.c)
 target_include_directories(vigamup2rom PRIVATE src)
 
+add_executable(kss_track_analyzer tools/kss_track_analyzer.c)
+target_include_directories(kss_track_analyzer PRIVATE
+  3rd_party/libkss/src
+  3rd_party/libkss/modules)
+target_link_libraries(kss_track_analyzer PRIVATE kss)
+
 add_executable(kspplayer src/kssplayer.c)
 # Keep the old executable name as a compatibility target. Both names use the
 # same KSP/KSS and MoonSound-capable implementation.
@@ -201,6 +212,7 @@ if(UNIX)
   target_link_libraries(pro2kss PRIVATE m)
   target_link_libraries(sngpro2kss PRIVATE m)
   target_link_libraries(vigamup2kss PRIVATE m)
+  target_link_libraries(kss_track_analyzer PRIVATE m)
   target_link_libraries(kspplayer PRIVATE m)
   target_link_libraries(kssplayer PRIVATE m)
 endif()

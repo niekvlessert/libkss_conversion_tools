@@ -57,7 +57,18 @@ def main() -> int:
     write_msx_binary(output, payload)
     (args.output_dir / "KSSPLAYS.BAS").write_bytes(
         b'10 CLS\r\n'
-        b'20 BLOAD "KSSPLAYS.BIN",R\r\n'
+        b'20 PRINT "DMV ROM MOONSOUND PLAYER"\r\n'
+        b'30 PRINT "1 ALMOSEND"\r\n'
+        b'40 PRINT "2 ANGEL_01"\r\n'
+        b'50 PRINT "3 ANGEL_06"\r\n'
+        b'60 PRINT "4 ANGEL_09"\r\n'
+        b'70 PRINT "5 CLIMAX"\r\n'
+        b'80 PRINT "SELECT 1-5:"\r\n'
+        b'90 A$=INPUT$(1)\r\n'
+        b'100 IF A$<"1" OR A$>"5" THEN 90\r\n'
+        b'110 POKE &HBFFF,ASC(A$)-49\r\n'
+        b'120 PRINT "LOADING ENGINE AND TRACK..."\r\n'
+        b'130 BLOAD "KSSPLAYS.BIN",R\r\n'
     )
     print(
         f"wrote {output} ({len(payload)} bytes, "

@@ -489,4 +489,3 @@ index 6ddf0e3..2c25647 100644
  
  void VM_set_PSG_type(VM *vm, uint32_t psg_type);
  void VM_set_SCC_type(VM *vm, uint32_t scc_type);
-
