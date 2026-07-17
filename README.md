@@ -53,11 +53,11 @@ In the compressed KSP file, the engine and other shared data are stored only onc
 
 Pretty cool stuff I'd say!
 
-So I created a MSX-DOS2 player with can play those SCC and OPL4 packs. AI and me had a hard time but it works! Though it has issues; for example you can't exit playback of a Moonsound track without rebooting, the KSP files don't support MWK files yet, the title is only showed for the first track which is not accurate for Konami SCC of course, etc.
+So I created a MSX-DOS2 player which can play those SCC and OPL4 packs. AI and me had a hard time but it works! Though it has issues; for example you can't exit playback of a Moonsound track without rebooting, the KSP files don't support MWK files yet, the title is only showed for the first track which is not accurate for Konami SCC of course, no FMPAC tested, etc.
 
 But mounting the msx directory on openMSX while starting it with '-machine Panasonic_FS-A1ST -ext msxdos2 -extb scc -extc moonsound' works well otherwise I'd say.
 
-kssplay <filename>.ksp, that's it. Space for next, escape to exit.
+kssplay filename.ksp, that's it. Space for next, escape to exit.
 
 Having all Kingsvalley 2 music in 15499 bytes is pretty cool as well I think.
 
@@ -71,4 +71,3 @@ Things I'm thinking about;
 - Embedding more meta data like game, publisher, composers, etc.
 - Creating more automation in converting KSS files to KSP, so they will work on MSX. For example the Sega Music. Don't know if that's doable.
 - ???
-
