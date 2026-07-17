@@ -5,6 +5,15 @@ music data and rebuilding the result as banked KSS. It records the Quarth
 engine analysis and the workflow that should be reused for F-1 Spirit,
 Nemesis, and the other Konami packs.
 
+> Current native target (July 2026): build every MSX file with the generic
+> complete-page pipeline in `tools/build_konami_complete_pages.py`. The native
+> `KSPPLAY.COM` accepts internal `KCPX`/`KCPZ` markers alongside compact
+> MoonSound KSP resources. Raw KSS/KSSX and
+> the former game-specific `QCPX`/`QCPZ` and `SCPX`/`SCPZ` containers are not
+> supported. The Quarth and Salamander sections below retain those old names
+> only to document how their relocation bugs were discovered; do not use the
+> game-specific formats as new player interfaces.
+
 ## Why a raw banked KSS can be larger
 
 The standard KSCC header is only 16 bytes. The important storage rule is that
@@ -234,7 +243,7 @@ compare after alignment. The music stream and bank selections remain stable;
 all 19 remapped IDs load and select the expected bank in the short validation
 run.
 
-## Quarth complete-page container
+## Quarth complete-page container (historical QCP prototype)
 
 For the stricter MSX layout, duplicating the engine in every mapper bank is
 unnecessary. `tools/build_quarth_16k_complete_page.py` writes
@@ -344,7 +353,7 @@ Quarth song ID in A. Without `PUSH AF`/`POP AF`, every request selected song 7;
 on pages not containing song 7 this degraded into invalid pointers and
 hanging or single-channel output.
 
-## Salamander complete-page conversion
+## Salamander complete-page conversion (historical SCP prototype)
 
 Salamander starts as one `6000H..C046H` KSCC load image. The useful fixed
 engine is `6000H..73C7H`, with the original KSS wrappers at `C000H..C046H`;

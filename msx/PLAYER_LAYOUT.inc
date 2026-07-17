@@ -1,13 +1,8 @@
-; Default layout for assembling the bootstrap player.
-; tools/build_msx_dos2_kss.py supplies an alternate include for the
-; page-1-resident Quarth runtime build.
+; Default layout for assembling the fixed page-3 player bootstrap.
 
         org     0xC000
 
 PLAYER_BASE:        equ 0xC000
-PLAYER_RUNTIME_BASE: equ 0x52E4
-PLAYER_RUNTIME_CONFIG_TARGET: equ 0x5C47
-PLAYER_RUNTIME_ENTRY: equ 0x52F7
 
 BIOS_ENASLT:    equ     0x0024
 BIOS_CHPUT:     equ     0x00A2
@@ -34,9 +29,8 @@ RUNTIME_PUT_P0:       equ RUNTIME_ORIGINAL_P2+1
 RUNTIME_PUT_P1:       equ RUNTIME_PUT_P0+2
 RUNTIME_PUT_P2:       equ RUNTIME_PUT_P1+2
 RUNTIME_STACK_TOP:    equ RUNTIME_PUT_P2+2
-RUNTIME_CONFIG_END:   equ RUNTIME_STACK_TOP+2
-RUNTIME_BLOB_SOURCE:  equ RUNTIME_CONFIG_END
-RUNTIME_BLOB_SIZE:    equ RUNTIME_BLOB_SOURCE+2
+RUNTIME_INPUT_FORMAT: equ RUNTIME_STACK_TOP+2
+RUNTIME_CONFIG_END:   equ RUNTIME_INPUT_FORMAT+1
 STAGE_BANK:           equ 12
 
 BASIC_PTR:      equ     0x7FF0
@@ -49,13 +43,13 @@ FIELD_SCRATCH:  equ     0xC800
 ; and all copied page-3 runtime helpers above that buffer.
 ; Fixed page-3 TPA scratch area. Keep this after the complete bootstrap code
 ; and well below the runtime marker/stack reservation.
-QCPX_SCRATCH:      equ  0xD600
-QCPX_SCRATCH_SIZE: equ  0x0200
+KCPX_SCRATCH:      equ  0xD600
+KCPX_SCRATCH_SIZE: equ  0x0200
 
 STACK_TOP:      equ     0xDA00
 RETURN_STUB:    equ     0xD920
-; Keep the live wrapper outside the retained QCPX parser/materializer code.
-; Leave enough room for the QCPX return loop to save every engine register
+; Keep the live wrapper outside the retained KCPX parser/materializer code.
+; Leave enough room for the KCPX return loop to save every engine register
 ; while it polls the keyboard.  Track switching abandons those saved values
 ; by resetting SP in the INIT trampoline; an ordinary tick restores them.
 PLAY_WRAPPER:   equ     0xD950
@@ -80,12 +74,10 @@ SLOT_FFFF_SAVED: equ    0xD886
 HTIMI_SAVED:    equ     0xD888
 HTIMI_INSTALLED: equ   0xD88D
 ; Keep the bootstrap SCC handoff above all copied runtime helpers and below
-; the QCPX scratch buffer. CC9FH used to overlap the enlarged QCPX parser.
+; the KCPX scratch buffer. CC9FH used to overlap the enlarged KCPX parser.
 RUNTIME_MARKER: equ     0xD9F0
 ; These two bytes live in the reserved tail, not in the player code.  The
 ; DOS2 front-end fills them before entering the bootstrap; Disk BASIC falls
 ; back to SCC_SLOT_DEFAULT when the magic byte is absent.
 RUNTIME_SCC_SLOT:       equ RUNTIME_MARKER
 RUNTIME_SCC_SLOT_VALID: equ RUNTIME_MARKER+1
-PLAYER_RUNTIME_SCC_SLOT_TARGET:       equ 0x6290
-PLAYER_RUNTIME_SCC_SLOT_VALID_TARGET: equ 0x6291

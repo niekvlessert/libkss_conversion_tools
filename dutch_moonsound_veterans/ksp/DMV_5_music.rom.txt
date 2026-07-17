@@ -1,0 +1,26 @@
+DMV_5_music.rom
+
+Data-only MSX cartridge image for the first five unique DMV track/resource
+pairs. It contains no playback code beyond the cartridge initialization RET.
+
+Tracks in SONG ID order:
+  0 ALMOSEND.MWM
+  1 ANGEL_01.MWM + ANGELKIT.MWK
+  2 ANGEL_06.MWM
+  3 ANGEL_09.MWM + ANGELKIT.MWK
+  4 CLIMAX.MWM
+
+ROM layout:
+  file offset 0000H: MSX cartridge header (AB, init=4010H)
+  file offset 0010H: RET initialization stub
+  file offset 4000H: complete compact KSP1 payload
+  file size: 1E000H (120 KiB), padded with FFH
+
+The KSP payload is ZX0-compressed for ENGN/SONG and contains two unique MWK
+chunks. KSP directory offsets are relative to the KSP payload beginning at
+ROM offset 4000H.
+
+The image is arranged in 8 KiB banks. For a Konami-style mapper, the KSP
+payload begins in physical bank 2; a loader should select banks and translate
+KSP-relative offsets into bank/window addresses. The image is intentionally
+data-only so a separate player can define the final slot and mapper handling.

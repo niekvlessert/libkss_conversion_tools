@@ -7,7 +7,7 @@ set mute off
 set master_volume 100
 set PSG_volume 100
 set SCC_volume 100
-after realtime 12 {type "KSSPLAY.COM QUARTH.KSS 0"}
+after realtime 12 {type "KSPPLAY.COM QUARTH.KSP 0"}
 after realtime 15 {type "\r"}
 after realtime 20 {soundlog start [file join $test_dir quarth-two-switches.wav]}
 after realtime 26 {keymatrixdown 8 0x01}

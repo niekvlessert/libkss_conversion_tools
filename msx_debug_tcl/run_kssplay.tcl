@@ -6,16 +6,16 @@ source "/Volumes/EXT_SSD/AI/libkss_conversion_tools/openmsx_debug/openmsx_trace.
 
 set power on
 
-proc type_kssplay_command {} {
-    type "KSSPLAY.COM F1.KSS 54"
+proc type_kspplay_command {} {
+    type "KSPPLAY.COM F1SPIRIT.KSP 54"
 }
 
-proc submit_kssplay_command {} {
+proc submit_kspplay_command {} {
     type "\r"
 }
 
-after realtime 12 type_kssplay_command
-after realtime 15 submit_kssplay_command
+after realtime 12 type_kspplay_command
+after realtime 15 submit_kspplay_command
 
 # Keep a machine-side snapshot for diagnosing a DOS2 loader that stops after
 # the command has been submitted.  The screen remains visible in the normal

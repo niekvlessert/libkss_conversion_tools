@@ -1,4 +1,4 @@
-# OpenMSX smoke test for the uncompressed, logical-map Quarth KSS.
+# OpenMSX smoke test for the generic compressed Quarth KSP.
 
 source "/Volumes/EXT_SSD/AI/libkss_conversion_tools/openmsx_debug/openmsx_trace.tcl"
 set test_dir "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp"
@@ -11,7 +11,7 @@ set mute off
 set master_volume 100
 set PSG_volume 100
 set SCC_volume 100
-after realtime 12 {type "KSSPLAY.COM QUARTH.KSS 15"}
+after realtime 12 {type "KSPPLAY.COM QUARTH.KSP 15"}
 after realtime 15 {type "\r"}
 after realtime 25 {
     soundlog start [file join $test_dir quarth-msx.wav]

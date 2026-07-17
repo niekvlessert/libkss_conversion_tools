@@ -9,7 +9,7 @@ int main(void) {
     KSS *kss;
     VM *vm;
     uint32_t i;
-    kss = KSS_load_file("msx/F1.KSS");
+    kss = KSS_load_file("msx/F1SPIRIT.KSP");
     if (!kss) return 1;
     vm = VM_new(44100);
     VM_init_memory(vm, kss->ram_mode, kss->load_adr, kss->load_len,

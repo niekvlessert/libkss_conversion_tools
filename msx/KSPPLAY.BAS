@@ -1,4 +1,0 @@
-10 CLS
-20 PRINT "KSP ZX0 MOONSOUND PLAYBACK"
-30 PRINT "Loading compact engine and song..."
-40 BLOAD "KSPPLAY.BIN",R

@@ -2,7 +2,7 @@ source "/Volumes/EXT_SSD/AI/libkss_conversion_tools/openmsx_debug/openmsx_trace.
 
 set power on
 
-after realtime 12 {type "KSSPLAY.COM F1.KSS 54"}
+after realtime 12 {type "KSPPLAY.COM F1SPIRIT.KSP 54"}
 after realtime 15 {type "\r"}
 
 after boot {
