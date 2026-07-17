@@ -1,4 +1,4 @@
-set selector_snapshot "/tmp/kssplays-openmsx-state.txt"
+set selector_snapshot "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplays-openmsx-state.txt"
 proc write_selector_snapshot {} {
     global selector_snapshot
     if {[catch {

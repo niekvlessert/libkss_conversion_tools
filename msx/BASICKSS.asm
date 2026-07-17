@@ -1781,9 +1781,17 @@ qcpx_switch_song:
         jp      init_trampoline
 
 qcpx_silence:
+        ; Some original drivers leave page 2 in their own slot layout. Select
+        ; and enable the physical SCC before clearing it, otherwise these
+        ; writes can hit mapper RAM while the real chip keeps ringing.
+        ld      a,(RUNTIME_SCC_SLOT)
+        ld      h,0x80
+        call    CUSTOM_ENASLT
+        ld      a,0x3F
+        ld      (0x9000),a
         xor     a
-        ld      hl,0x988A
-        ld      b,6
+        ld      hl,0x9880
+        ld      b,16
 qcpx_silence_scc:
         ld      (hl),a
         inc     hl

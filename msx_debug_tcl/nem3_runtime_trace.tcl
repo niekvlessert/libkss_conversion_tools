@@ -8,7 +8,7 @@ after boot {
     trace_disasm on
     trace_mem_ranges {}
     trace_io_ranges {{0xA0 0xA1} {0xFC 0xFF}}
-    trace_start {/tmp/nem3-runtime-trace.log}
+    trace_start {/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/nem3-runtime-trace.log}
     after realtime 10 {
         type "RUN \"AUTOEXEC.BAS\"\r"
         after realtime 20 {

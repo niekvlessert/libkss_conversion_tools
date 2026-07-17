@@ -61,7 +61,7 @@ CONFIGS = {
                      0x6E12, 0x6000, 0x6E14, None, 0xC000, 0xC200, 0x7D00,
                      False),
     "kingsvalley2": Config(2, "King's Valley 2", 0x6000, 0x6024,
-                           0xC017, 0xC020, 0x6F2C, 0x6000, 0x6F2C, 0xC024,
+                           0xC017, 0xC020, 0x6F2E, 0x6000, 0x6F2E, 0xC024,
                            0xE000, 0xE200, 0x7D00),
     "nemesis2": Config(3, "Nemesis 2", 0x6000, 0x6047, 0xC017, 0xC043,
                        0x6612, 0x6480, 0x73C8, 0xC047, 0xE000, 0xE200, 0x7D00),
@@ -171,6 +171,37 @@ def disassemble_starts(raw: bytes, origin: int, name: str) -> list[int]:
     return starts
 
 
+def traced_instruction_starts(path: Path, image: bytes, cfg: Config,
+                              name: str) -> list[int]:
+    """Disassemble trace-proven code ranges from their real entrypoints.
+
+    A linear disassembly can run through an embedded dispatch table and lose
+    synchronization.  Restarting at each executed range recovers handlers
+    reached through indirect jumps and protects their first opcode from the
+    conservative operand-relocation fallback.
+    """
+    ranges: list[tuple[int, int]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("executed_ranges="):
+            continue
+        value = line.split("=", 1)[1]
+        if value == "none":
+            continue
+        for item in value.split(","):
+            start_text, end_text = item.split("-")
+            start, end = int(start_text, 16), int(end_text, 16)
+            start = max(start, cfg.load)
+            end = min(end, cfg.load + len(image))
+            if end > start:
+                ranges.append((start, end))
+    starts: set[int] = set()
+    for index, (start, end) in enumerate(merged_ranges(ranges, gap=0)):
+        starts.update(disassemble_starts(
+            image_slice(image, cfg, start, end), start,
+            f"{name}-trace-{index}"))
+    return sorted(starts)
+
+
 def patch_code(page: bytearray, amap: AddressMap, source_address: int,
                destination: int, size: int, instruction_starts: list[int],
                psg_gateway: int = PSG_GATEWAY,
@@ -178,6 +209,7 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
     start = destination - PAGE_ADDRESS
     code = page[start:start + size]
     patched = 0
+    instruction_start_set = set(instruction_starts)
 
     # Original game slot switching is invalid in the DOS2 player. The player
     # establishes page 1 RAM and page 2 SCC before entering the engine.
@@ -213,6 +245,10 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
             opcode = code[offset + 1]
         if operand is None or operand + 2 > len(code):
             continue
+        absolute_operand = source_address + operand
+        if absolute_operand in instruction_start_set or \
+                absolute_operand + 1 in instruction_start_set:
+            continue
         value = word(code, operand)
         replacement = amap.get(value)
         # SCC register/wave RAM is physically fixed even when the original
@@ -237,6 +273,10 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
                 (replacement < PAYLOAD_LIMIT and
                  not exhaustive_operand_patch):
             continue
+        absolute_operand = source_address + operand
+        if absolute_operand in instruction_start_set or \
+                absolute_operand + 1 in instruction_start_set:
+            continue
         opcode = code[operand - 1]
         normal = opcode in ABSOLUTE_WORD_OPCODES
         indexed = (operand >= 2 and code[operand - 2] in (0xDD, 0xFD)
@@ -246,6 +286,16 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
         if normal or indexed or extended:
             put_word(code, operand, replacement)
             patched += 1
+
+    # Direct primary-slot writes from a page-1 engine map the executing code
+    # away under DOS2. Every traced OUT (A8H),A must have been replaced by the
+    # slot-switch signature pass above.
+    for instruction in instruction_starts:
+        offset = instruction - source_address
+        if 0 <= offset and code[offset:offset + 2] == b"\xD3\xA8":
+            raise ValueError(
+                f"unpatched OUT (A8H),A at {instruction:04X}; "
+                "check the configured engine boundary")
     page[start:start + size] = code
     return patched
 
@@ -517,6 +567,8 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
     main_instructions = disassemble_starts(
         image_slice(image, cfg, cfg.code_start, cfg.engine_end), cfg.code_start,
         f"{stem}-main")
+    main_instructions = sorted(set(main_instructions) | set(
+        traced_instruction_starts(trace, image, cfg, f"{stem}-main")))
     wrapper_instructions = (disassemble_starts(
         image_slice(image, cfg, cfg.wrapper_start, cfg.wrapper_end),
         cfg.wrapper_start,

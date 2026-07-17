@@ -16,7 +16,7 @@ import struct
 from build_konami_complete_pages import (
     CONFIGS, FIXED_SIZE, HEADER_SIZE, PAGE_SIZE, WRAPPER_DEST, Config, common_template,
     compress, descriptor_address, disassemble_starts, info_block, make_page,
-    overlay_from_template, put_word, read_trackinfo,
+    overlay_from_template, put_word, read_trackinfo, traced_instruction_starts,
 )
 
 
@@ -141,7 +141,18 @@ def disable_original_bank_switches(page: bytearray, stem: str,
     elif stem == "nemesis3":
         for address in (0x5FC1, 0x5FE1):
             page[address + base:address + base + 10] = bytes(10)
-        for address in (0x62EC, 0x62F3, 0x62FA):
+        # Preserve the conditional/unconditional JR instructions immediately
+        # before these bank writes. The five NOPs replace exactly LD A,n plus
+        # LD (B000H),A (20 cycles), so control flow and timing stay intact.
+        for address, bank in ((0x62EC, 0x0A),
+                              (0x62F3, 0x0D),
+                              (0x62FA, 0x09)):
+            expected = bytes((0x3E, bank, 0x32, 0x00, 0xB0))
+            actual = bytes(page[address + base:address + base + 5])
+            if actual != expected:
+                raise ValueError(
+                    f"unexpected Nemesis 3 bank write at {address:04X}: "
+                    f"{actual.hex(' ')}")
             page[address + base:address + base + 5] = bytes(5)
     elif stem == "solidsnake":
         page[0x6D3D + base:0x6D3F + base] = bytes(2)
@@ -160,6 +171,28 @@ def disable_original_bank_switches(page: bytearray, stem: str,
         for source in (0xDE43, 0xDE4F):
             offset = WRAPPER_DEST - 0x4000 + source - 0xDE00
             page[offset:offset + 2] = bytes(2)
+
+
+def validate_traced_opcodes(page: bytearray, image: bytes, cfg: Config,
+                            instructions: list[int]) -> None:
+    """Reject relocations that alter a trace-proven instruction opcode."""
+    main_start = cfg.main_start if cfg.main_start is not None else cfg.load
+    main_destination = (cfg.main_destination if cfg.main_destination is not None
+                        else main_start)
+    for source in instructions:
+        if not (main_start <= source < cfg.engine_end):
+            continue
+        destination = main_destination + source - main_start
+        expected = image[source - cfg.load]
+        actual = page[destination - 0x4000]
+        # The common patcher deliberately replaces OUT (A8H),A by JR +0.
+        if expected == 0xD3 and actual == 0x18 and \
+                image[source - cfg.load + 1] == 0xA8:
+            continue
+        if actual != expected:
+            raise ValueError(
+                f"relocation changed traced opcode {source:04X}: "
+                f"{expected:02X} -> {actual:02X}")
 
 
 def write_container(stem: str, cfg: Config, rows, pages, compressed: bool,
@@ -234,6 +267,11 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
     instructions = disassemble_starts(
         engine[main_offset:main_offset + cfg.engine_end - main_start], main_start,
                                       f"{stem}-banked-main")
+    representative = virtual_image(stem, engine, banks, (0, 1))
+    traced_instructions = traced_instruction_starts(
+        ROOT / "vigamup" / "extracted" / f"{stem}.track_extract",
+        representative, cfg, f"{stem}-banked-main")
+    instructions = sorted(set(instructions) | set(traced_instructions))
     wrapper_instructions = []
     if cfg.wrapper_end is not None:
         start = cfg.wrapper_start - source_load
@@ -268,6 +306,7 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
                              wrapper_instructions)
         except ValueError as error:
             raise ValueError(f"track {track}: {error}") from error
+        validate_traced_opcodes(page, image, cfg, traced_instructions)
         disable_original_bank_switches(page, stem, executed)
         pages.append(page)
     write_container(stem, cfg, rows, pages, compressed, destination, packer)

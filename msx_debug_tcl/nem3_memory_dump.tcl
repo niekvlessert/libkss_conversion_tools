@@ -1,4 +1,4 @@
-set nem3_dump_path "/tmp/nem3-openmsx-dump-current.txt"
+set nem3_dump_path "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/nem3-openmsx-dump-current.txt"
 
 proc dump_nem3_memory {} {
     global nem3_dump_path
@@ -38,7 +38,7 @@ puts $output "MAPPER_FF=[format %02X [debug read ioports 0xFF]]"
     set main_ram [debug read_block {Main RAM} 0 [debug size {Main RAM}]]
     set signature [binary format H* "14e8fffe01ee01e907ea07eb0370d1b0"]
     puts $output "MAIN_RAM_SIGNATURE_OFFSET=[string first $signature $main_ram]"
-    set raw [open "/tmp/nem3-mainram.bin" w]
+    set raw [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/nem3-mainram.bin" w]
     fconfigure $raw -translation binary -encoding binary
     puts -nonewline $raw $main_ram
     close $raw

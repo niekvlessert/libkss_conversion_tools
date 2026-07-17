@@ -8,4 +8,4 @@ exec "$OPENMSX" \
 -machine Panasonic_FS-A1ST \
   -ext msxdos2 -extb scc \
   -diska "$SCRIPT_DIR" \
-  -script "$SCRIPT_DIR/run_kssplay.tcl"
+  -script "$SCRIPT_DIR/../msx_debug_tcl/run_kssplay.tcl"

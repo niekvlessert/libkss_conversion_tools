@@ -12,7 +12,7 @@ after boot {
     trace_disasm on
     trace_mem_ranges {}
     trace_io_ranges {{0xA8 0xA8} {0xFC 0xFF}}
-    trace_start {/tmp/kssplay-entry-trace.log}
+    trace_start {/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-entry-trace.log}
     after realtime 20 {
         trace_stop
         exit

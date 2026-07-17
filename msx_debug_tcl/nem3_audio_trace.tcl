@@ -10,7 +10,7 @@ after boot {
     trace_disasm on
     trace_mem_ranges {{0x9800 0x98FF} {0xB800 0xB8FF}}
     trace_io_ranges {{0x98 0x9B} {0xA0 0xA1} {0xC0 0xC7}}
-    trace_start {/tmp/nem3-audio-trace-fixed.log}
+    trace_start {/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/nem3-audio-trace-fixed.log}
     after realtime 10 {
         type "RUN \"AUTOEXEC.BAS\"\r"
         after realtime 30 {

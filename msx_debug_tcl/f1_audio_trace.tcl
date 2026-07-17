@@ -7,7 +7,7 @@ after boot {
     trace_disasm on
     trace_mem_ranges {}
     trace_io_ranges {{0x98 0x9B} {0xA0 0xA1} {0xFC 0xFF}}
-    trace_start {/tmp/f1-msx-audio-trace.log}
+    trace_start {/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/f1-msx-audio-trace.log}
     after realtime 30 {
         trace_stop
         exit

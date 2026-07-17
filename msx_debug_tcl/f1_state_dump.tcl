@@ -1,5 +1,5 @@
 proc dump_f1_state {} {
-    set output [open "/tmp/f1-msx-state.txt" w]
+    set output [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/f1-msx-state.txt" w]
     foreach regname {PC SP AF BC DE HL IX IY} {
         puts $output "$regname=[format %04X [reg $regname]]"
     }
@@ -12,7 +12,7 @@ proc dump_f1_state {} {
     }
     puts $output "PSG_REGS=[binary encode hex [debug read_block {PSG regs} 0 0x10]]"
     set bank [debug read_block {Main RAM} [expr {14 * 0x4000}] 0x4000]
-    set raw [open "/tmp/f1-msx-segment14.bin" w]
+    set raw [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/f1-msx-segment14.bin" w]
     fconfigure $raw -translation binary -encoding binary
     puts -nonewline $raw $bank
     close $raw

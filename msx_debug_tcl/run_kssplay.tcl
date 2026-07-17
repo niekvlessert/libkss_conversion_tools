@@ -21,7 +21,7 @@ after realtime 15 submit_kssplay_command
 # the command has been submitted.  The screen remains visible in the normal
 # GUI run; these files let us inspect the exact CPU state and text screen.
 proc dump_kssplay_state {} {
-    set output [open "/tmp/kssplay-msx-state.txt" w]
+    set output [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-msx-state.txt" w]
     foreach regname {PC SP AF BC DE HL IX IY} {
         puts $output "$regname=[format %04X [reg $regname]]"
     }
@@ -40,18 +40,18 @@ proc dump_kssplay_state {} {
         puts $output "VECTOR_[format %04X $address]=[binary encode hex $bytes]"
     }
     set vram [debug read_block {physical VRAM} 0 0x8000]
-    set raw [open "/tmp/kssplay-msx-screen.bin" w]
+    set raw [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-msx-screen.bin" w]
     fconfigure $raw -translation binary -encoding binary
     puts -nonewline $raw $vram
     close $raw
     if {![catch {debug read_block {Empty Konami SCC Cartridge SCC SCC} 0 0x100} scc]} {
-        set sccraw [open "/tmp/kssplay-scc.bin" w]
+        set sccraw [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-scc.bin" w]
         fconfigure $sccraw -translation binary -encoding binary
         puts -nonewline $sccraw $scc
         close $sccraw
     }
     set mainram_size [debug size {Main RAM}]
-    set physical [open "/tmp/kssplay-mainram.txt" w]
+    set physical [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-mainram.txt" w]
     puts $physical "MAIN_RAM_SIZE=$mainram_size"
     set segment_count [expr {$mainram_size / 0x4000}]
     for {set segment 0} {$segment < $segment_count} {incr segment} {
@@ -67,7 +67,7 @@ proc dump_kssplay_state {} {
     puts $physical "PLAYER_VARS=[binary encode hex [debug read_block {Main RAM} [expr {4 * 0x4000 + 0x640}] 0x40]]"
     foreach segment {0 2 7} {
         set full [debug read_block {Main RAM} [expr {$segment * 0x4000}] 0x4000]
-        set fullraw [open "/tmp/kssplay-segment-[format %02X $segment].bin" w]
+        set fullraw [open "/Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-segment-[format %02X $segment].bin" w]
         fconfigure $fullraw -translation binary -encoding binary
         puts -nonewline $fullraw $full
         close $fullraw
@@ -85,8 +85,8 @@ after realtime 17 {
     trace_disasm on
     trace_mem_ranges {{0x9800 0x98FF} {0xB800 0xB8FF}}
     trace_io_ranges {{0xA0 0xA1} {0x98 0x9B} {0xFC 0xFF}}
-    trace_start /tmp/kssplay-audio-trace.log
-    soundlog start /tmp/kssplay-audio.wav
+    trace_start /Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-audio-trace.log
+    soundlog start /Volumes/EXT_SSD/AI/libkss_conversion_tools/tmp/kssplay-audio.wav
     after realtime 10 {
         soundlog stop
         trace_stop
