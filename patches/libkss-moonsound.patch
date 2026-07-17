@@ -1,20 +1,21 @@
 diff --git a/src/kssplay.c b/src/kssplay.c
-index bce81b5..a9b0cb7 100644
+index bce81b5..754a714 100644
 --- a/src/kssplay.c
 +++ b/src/kssplay.c
-@@ -1,7 +1,10 @@
+@@ -1,7 +1,11 @@
  /*
   * 2004-05-23 : Patched for GG Stereo by RuRuRu
   */
 -#include "kssplay.h"
 +#include "kssplay.h"
++#include "zx_decompressor.h"
 +#ifdef KSS_HAVE_MOONSOUND
 +#include "moonsound_opl4.h"
 +#endif
  #include <assert.h>
  #include <math.h>
  #include <stdio.h>
-@@ -11,10 +14,58 @@
+@@ -11,11 +15,830 @@
  #define PAL_FREQ 50.0
  #define NTSC_FREQ (3579545.0 / 59718.0) /* 59.94 */
  
@@ -23,6 +24,7 @@ index bce81b5..a9b0cb7 100644
  
  static int mgs_pos = 0;
 -static char mgs_text[256];
+-static int mgs_text_update(VM *vm, uint32_t a, uint32_t d) {
 +static char mgs_text[256];
 +
 +/* DMV1 MBWave uses the MWM base-frequency byte to drive its timer. A normal
@@ -64,6 +66,435 @@ index bce81b5..a9b0cb7 100644
 +  return song[6u + 0x1bu];
 +}
 +
++static int is_quarth_map_kss(const KSSPLAY *kssplay) {
++  const KSS *kss = kssplay ? kssplay->kss : NULL;
++  if (kssplay && kssplay->quarth_complete_page)
++    return 1;
++  if (!kss || kss->bank_mode != BANK_16K || kss->bank_num != 2 ||
++      kss->play_adr != 0x52df)
++    return 0;
++  return kss->load_adr == 0x4000 ||
++         (kss->kssx && kss->load_adr == 0x0200 &&
++          kss->init_adr == 0x0200);
++}
++
++/* SCPX stores one relocated Salamander page-1 template plus one payload and
++ * descriptor patch set per required song. */
++static int materialize_salamander_complete_pages(KSS *kss,
++                                                  uint32_t header_size,
++                                                  uint8_t *bank_data,
++                                                  KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint8_t *snapshot = NULL;
++  uint32_t tail_offset, tail_size, template_size, payload_address;
++  uint32_t page_count, cursor, page, i;
++  uint32_t record_offset[0x80], data_size[0x80], patch_count[0x80];
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num != 14 || kss->load_adr != 0x0200 ||
++      kss->init_adr != 0x5f97 || kss->play_adr != 0x5fc3)
++    return 1;
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 528 ||
++      memcmp(kss->data + tail_offset, "SCPX", 4) != 0)
++    return 1;
++  tail = kss->data + tail_offset;
++  tail_size = kss->size - tail_offset;
++  if (tail[4] != 1 || tail[5] != 14 || tail[6] != 14)
++    return 0;
++  page_count = tail[5];
++  template_size = (uint32_t)tail[8] | ((uint32_t)tail[9] << 8);
++  payload_address = (uint32_t)tail[10] | ((uint32_t)tail[11] << 8);
++  if (template_size != 0x4000 || payload_address != 0x4000 ||
++      528 + template_size > tail_size)
++    return 0;
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[272 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++  cursor = 528 + template_size;
++  for (page = 0; page < page_count; page++) {
++    uint32_t patches;
++    if (cursor + 4 > tail_size)
++      return 0;
++    record_offset[page] = cursor;
++    data_size[page] = (uint32_t)tail[cursor] |
++                      ((uint32_t)tail[cursor + 1] << 8);
++    patches = (uint32_t)tail[cursor + 2] |
++              ((uint32_t)tail[cursor + 3] << 8);
++    patch_count[page] = patches;
++    cursor += 4;
++    if (data_size[page] > 0x4000 || patches > 1024 ||
++        cursor + patches * 4 + data_size[page] > tail_size)
++      return 0;
++    for (i = 0; i < patches; i++) {
++      uint32_t offset = (uint32_t)tail[cursor + i * 4] |
++                        ((uint32_t)tail[cursor + i * 4 + 1] << 8);
++      if (offset + 2 > 0x4000)
++        return 0;
++    }
++    cursor += patches * 4 + data_size[page];
++  }
++  if (!bank_data)
++    return 2;
++  snapshot = malloc(tail_size);
++  if (!snapshot)
++    return 0;
++  memcpy(snapshot, tail, tail_size);
++  tail = snapshot;
++  for (page = 0; page < page_count; page++) {
++    uint8_t *output = bank_data + page * 0x4000;
++    uint32_t patch_cursor = record_offset[page] + 4;
++    memcpy(output, tail + 528, 0x4000);
++    for (i = 0; i < patch_count[page]; i++) {
++      uint32_t offset = (uint32_t)tail[patch_cursor] |
++                        ((uint32_t)tail[patch_cursor + 1] << 8);
++      output[offset] = tail[patch_cursor + 2];
++      output[offset + 1] = tail[patch_cursor + 3];
++      patch_cursor += 4;
++    }
++    memcpy(output + payload_address - 0x4000, tail + patch_cursor,
++           data_size[page]);
++  }
++  free(snapshot);
++  return 2;
++}
++
++/* SCPZ is the ZX0-compressed Salamander complete-page container. It stores
++ * the relocated 16K page-1 template once and a compressed payload plus an
++ * absolute page-offset patch set for each logical song page. */
++static int materialize_salamander_compressed_complete_pages(
++    KSS *kss, uint32_t header_size, uint8_t *bank_data, KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint8_t *snapshot = NULL;
++  uint32_t tail_offset, tail_size, page_count, template_packed;
++  uint32_t template_offset, page, i;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num != 14 || kss->load_adr != 0x0200 ||
++      kss->init_adr != 0x5f97 || kss->play_adr != 0x5fc3)
++    return 1;
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 532 ||
++      memcmp(kss->data + tail_offset, "SCPZ", 4) != 0)
++    return 1;
++  tail = kss->data + tail_offset;
++  tail_size = kss->size - tail_offset;
++  if (tail[4] != 1 || tail[5] != 14 || tail[6] != 14 ||
++      ((uint32_t)tail[8] | ((uint32_t)tail[9] << 8)) != 0x4000 ||
++      ((uint32_t)tail[10] | ((uint32_t)tail[11] << 8)) != 0x4000)
++    return 0;
++  page_count = tail[5];
++  template_packed = (uint32_t)tail[528] | ((uint32_t)tail[529] << 8);
++  template_offset = (uint32_t)tail[530] | ((uint32_t)tail[531] << 8);
++  if (532 + page_count * 10 > tail_size ||
++      template_offset + template_packed > tail_size)
++    return 0;
++
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[272 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++
++  if (bank_data) {
++    snapshot = malloc(tail_size);
++    if (!snapshot)
++      return 0;
++    memcpy(snapshot, tail, tail_size);
++    tail = snapshot;
++  }
++
++  for (page = 0; page < page_count; page++) {
++    uint32_t descriptor = 532 + page * 10;
++    uint32_t data_size = (uint32_t)tail[descriptor] |
++                         ((uint32_t)tail[descriptor + 1] << 8);
++    uint32_t patch_count = (uint32_t)tail[descriptor + 2] |
++                           ((uint32_t)tail[descriptor + 3] << 8);
++    uint32_t packed_size = (uint32_t)tail[descriptor + 4] |
++                           ((uint32_t)tail[descriptor + 5] << 8);
++    uint32_t stream_offset = (uint32_t)tail[descriptor + 6] |
++                             ((uint32_t)tail[descriptor + 7] << 8);
++    uint32_t patch_offset = (uint32_t)tail[descriptor + 8] |
++                            ((uint32_t)tail[descriptor + 9] << 8);
++    uint8_t *output;
++    if (data_size > 0x4000 || patch_count > 1024 ||
++        stream_offset + packed_size > tail_size ||
++        patch_offset + patch_count * 4 > tail_size)
++      goto scpz_bad;
++    for (i = 0; i < patch_count; i++) {
++      uint32_t entry = patch_offset + i * 4;
++      uint32_t offset = (uint32_t)tail[entry] |
++                        ((uint32_t)tail[entry + 1] << 8);
++      if (offset + 2 > 0x4000)
++        goto scpz_bad;
++    }
++    if (!bank_data)
++      continue;
++    output = bank_data + page * 0x4000;
++    if (!zx0_decompress_data(tail + template_offset, template_packed,
++                             output, 0x4000) ||
++        !zx0_decompress_data(tail + stream_offset, packed_size,
++                             output, data_size))
++      goto scpz_bad;
++    for (i = 0; i < patch_count; i++) {
++      uint32_t entry = patch_offset + i * 4;
++      uint32_t offset = (uint32_t)tail[entry] |
++                        ((uint32_t)tail[entry + 1] << 8);
++      output[offset] = tail[entry + 2];
++      output[offset + 1] = tail[entry + 3];
++    }
++  }
++  free(snapshot);
++  return 2;
++scpz_bad:
++  free(snapshot);
++  return 0;
++}
++
++/* QCPZ is the ZX0-compressed form of the complete-page Quarth container.
++ * Stream offsets are relative to the QCPZ magic. Each page is reconstructed
++ * as a normal writable 16K bank before the VM starts. */
++static int materialize_quarth_compressed_complete_pages(
++    KSS *kss, uint32_t header_size, uint8_t *bank_data, KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint32_t tail_offset, tail_size, engine_size, common_size;
++  uint32_t page_data_address, page_count, engine_packed, engine_offset;
++  uint32_t common_packed, common_offset, page, i;
++  uint8_t *tail_snapshot = NULL;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num < 1 || kss->load_adr != 0x0200 ||
++      kss->init_adr != 0x52bb || kss->play_adr != 0x52df)
++    return 1;
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 586 ||
++      memcmp(kss->data + tail_offset, "QCPZ", 4) != 0)
++    return 1;
++  tail = kss->data + tail_offset;
++  tail_size = kss->size - tail_offset;
++  if (tail[4] != 1 || tail[5] != kss->bank_num || tail[6] != 19 ||
++      tail[5] > 0x7f)
++    return 0;
++  page_count = tail[5];
++  engine_size = (uint32_t)tail[8] | ((uint32_t)tail[9] << 8);
++  common_size = (uint32_t)tail[10] | ((uint32_t)tail[11] << 8);
++  page_data_address = (uint32_t)tail[12] | ((uint32_t)tail[13] << 8);
++  engine_packed = (uint32_t)tail[528] | ((uint32_t)tail[529] << 8);
++  engine_offset = (uint32_t)tail[530] | ((uint32_t)tail[531] << 8);
++  common_packed = (uint32_t)tail[532] | ((uint32_t)tail[533] << 8);
++  common_offset = (uint32_t)tail[534] | ((uint32_t)tail[535] << 8);
++  if (page_data_address < 0x4000 ||
++      engine_size + common_size != page_data_address - 0x4000 ||
++      engine_size + common_size > 0x4000 ||
++      engine_offset + engine_packed > tail_size ||
++      common_offset + common_packed > tail_size ||
++      536 + page_count * 10 > tail_size)
++    return 0;
++
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[272 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++
++  /* The expanded bank area begins at the QCPZ tail. Preserve all compressed
++   * streams before page 0 overwrites the source from which it is decoding. */
++  if (bank_data) {
++    tail_snapshot = malloc(tail_size);
++    if (!tail_snapshot)
++      return 0;
++    memcpy(tail_snapshot, tail, tail_size);
++    tail = tail_snapshot;
++  }
++
++  for (page = 0; page < page_count; page++) {
++    uint32_t descriptor = 536 + page * 10;
++    uint32_t data_size = (uint32_t)tail[descriptor] |
++                         ((uint32_t)tail[descriptor + 1] << 8);
++    uint32_t patch_count = (uint32_t)tail[descriptor + 2] |
++                           ((uint32_t)tail[descriptor + 3] << 8);
++    uint32_t packed_size = (uint32_t)tail[descriptor + 4] |
++                           ((uint32_t)tail[descriptor + 5] << 8);
++    uint32_t stream_offset = (uint32_t)tail[descriptor + 6] |
++                             ((uint32_t)tail[descriptor + 7] << 8);
++    uint32_t patch_offset = (uint32_t)tail[descriptor + 8] |
++                            ((uint32_t)tail[descriptor + 9] << 8);
++    uint8_t *output;
++    if (data_size > 0x4000 || patch_count > 1024 ||
++        page_data_address - 0x4000 + data_size > 0x4000 ||
++        stream_offset + packed_size > tail_size ||
++        patch_offset + patch_count * 4 > tail_size)
++      goto qcpz_bad;
++    for (i = 0; i < patch_count; i++) {
++      uint32_t offset = (uint32_t)tail[patch_offset + i * 4] |
++                        ((uint32_t)tail[patch_offset + i * 4 + 1] << 8);
++      if (offset + 2 > common_size)
++        goto qcpz_bad;
++    }
++    if (!bank_data)
++      continue;
++    output = bank_data + page * 0x4000;
++    memset(output, 0, 0x4000);
++    if (!zx0_decompress_data(tail + engine_offset, engine_packed,
++                             output, engine_size) ||
++        !zx0_decompress_data(tail + common_offset, common_packed,
++                             output + engine_size, common_size) ||
++        !zx0_decompress_data(tail + stream_offset, packed_size,
++                             output + page_data_address - 0x4000, data_size))
++      goto qcpz_bad;
++    for (i = 0; i < patch_count; i++) {
++      uint32_t entry = patch_offset + i * 4;
++      uint32_t offset = (uint32_t)tail[entry] |
++                        ((uint32_t)tail[entry + 1] << 8);
++      output[engine_size + offset] = tail[entry + 2];
++      output[engine_size + offset + 1] = tail[entry + 3];
++    }
++  }
++  free(tail_snapshot);
++  return 2;
++qcpz_bad:
++  free(tail_snapshot);
++  return 0;
++}
++
++/* QCPX is the uncompressed complete-page Quarth container.  It stores one
++ * engine/common template followed by per-page stream payloads and patches.
++ * The materializer expands those records into ordinary 16K banks so the VM
++ * and existing KSS tooling still operate on normal mapper pages. */
++static int materialize_quarth_complete_pages(KSS *kss, uint32_t header_size,
++                                             uint8_t *bank_data,
++                                             KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint32_t tail_offset, engine_size, common_size, page_data_address;
++  uint32_t page_count, cursor, page, i;
++  uint32_t record_offset[0x80], record_data_size[0x80];
++  uint32_t record_patch_count[0x80];
++  uint8_t *tail_snapshot = NULL;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num < 1 || kss->load_adr != 0x0200 ||
++      kss->init_adr != 0x52bb || kss->play_adr != 0x52df)
++    return 1;
++
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 528 ||
++      memcmp(kss->data + tail_offset, "QCPX", 4) != 0)
++    return 1;
++
++  tail = kss->data + tail_offset;
++  if (tail[4] != 1 || tail[5] != kss->bank_num || tail[6] != 19)
++    return 0;
++  page_count = tail[5];
++  engine_size = (uint32_t)tail[8] | ((uint32_t)tail[9] << 8);
++  common_size = (uint32_t)tail[10] | ((uint32_t)tail[11] << 8);
++  page_data_address = (uint32_t)tail[12] | ((uint32_t)tail[13] << 8);
++  if (page_data_address < 0x4000 ||
++      engine_size + common_size != page_data_address - 0x4000 ||
++      engine_size + common_size > 0x4000 || page_count > 0x7f)
++    return 0;
++
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[16 + 256 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++
++  cursor = 16 + 512;
++  if (cursor + engine_size + common_size > kss->size - tail_offset)
++    return 0;
++  cursor += engine_size + common_size;
++
++  for (page = 0; page < page_count; page++) {
++    uint32_t data_size, patch_count;
++
++    if (cursor + 4 > kss->size - tail_offset)
++      return 0;
++    record_offset[page] = cursor;
++    data_size = (uint32_t)tail[cursor] | ((uint32_t)tail[cursor + 1] << 8);
++    patch_count = (uint32_t)tail[cursor + 2] |
++                  ((uint32_t)tail[cursor + 3] << 8);
++    record_data_size[page] = data_size;
++    record_patch_count[page] = patch_count;
++    cursor += 4;
++    if (patch_count > 1024 || data_size > 0x4000 ||
++        cursor + patch_count * 4 + data_size > kss->size - tail_offset)
++      return 0;
++    if (engine_size + common_size + data_size > 0x4000)
++      return 0;
++    for (i = 0; i < patch_count; i++) {
++      uint32_t patch_offset = (uint32_t)tail[cursor + i * 4] |
++                              ((uint32_t)tail[cursor + i * 4 + 1] << 8);
++      if (patch_offset + 2 > common_size)
++        return 0;
++    }
++    cursor += patch_count * 4;
++    cursor += data_size;
++  }
++
++  if (!bank_data)
++    return 2;
++
++  /* bank_data starts directly after the load image and therefore overlaps
++   * the QCPX tail in the expanded KSS allocation. Preserve the source before
++   * writing page 0, otherwise the first page erases its own engine template.
++   */
++  tail_snapshot = malloc(kss->size - tail_offset);
++  if (!tail_snapshot)
++    return 0;
++  memcpy(tail_snapshot, tail, kss->size - tail_offset);
++  tail = tail_snapshot;
++
++  for (page = 0; page < page_count; page++) {
++    uint32_t record = record_offset[page];
++    uint32_t patch_cursor = record + 4;
++    uint8_t *output = bank_data + page * 0x4000;
++    memset(output, 0, 0x4000);
++    memcpy(output, tail + 16 + 512, engine_size);
++    memcpy(output + engine_size, tail + 16 + 512 + engine_size,
++           common_size);
++    for (i = 0; i < record_patch_count[page]; i++) {
++      uint32_t patch_offset = (uint32_t)tail[patch_cursor] |
++                              ((uint32_t)tail[patch_cursor + 1] << 8);
++      uint32_t patch_value = (uint32_t)tail[patch_cursor + 2] |
++                             ((uint32_t)tail[patch_cursor + 3] << 8);
++      output[engine_size + patch_offset] = (uint8_t)patch_value;
++      output[engine_size + patch_offset + 1] = (uint8_t)(patch_value >> 8);
++      patch_cursor += 4;
++    }
++    memcpy(output + page_data_address - 0x4000,
++           tail + patch_cursor, record_data_size[page]);
++  }
++
++  free(tail_snapshot);
++  return 2;
++}
++
 +static double mbwave_vsync_frequency(KSSPLAY *kssplay) {
 +  uint8_t base_frequency;
 +
@@ -72,10 +503,401 @@ index bce81b5..a9b0cb7 100644
 +    return 0.0;
 +  return mbwave_frequency_from_base(base_frequency);
 +}
- static int mgs_text_update(VM *vm, uint32_t a, uint32_t d) {
++
++static uint32_t compact_kssx_loader_end(KSSPLAY *kssplay) {
++  if (!kssplay || !kssplay->kss || !kssplay->kss->kssx ||
++      kssplay->kss->load_adr != 0x0200 ||
++      kssplay->kss->init_adr != 0x0200)
++    return 0;
++  if (kssplay->kss->play_adr == 0x52df &&
++      kssplay->kss->bank_mode == BANK_16K && kssplay->kss->bank_num == 2)
++    return 0x0300; /* Quarth: bootstrap and decoder only. */
++  if (!kssplay->kss->ram_mode || kssplay->kss->bank_num != 0)
++    return 0;
++  if (kssplay->kss->play_adr == 0x5f80)
++    return 0x5f00; /* F-1 Spirit: engine starts at 5F00H. */
++  if (kssplay->kss->play_adr == 0x5fe0)
++    return 0x5f50; /* Nemesis 3: injected bank switcher ends before 5FC0H. */
++  return 0;
++}
++
++/* N3ZX is the private tail used by the compact Nemesis 3 KSSX builder. The
++ * KSS header describes three normal 16K banks, while this tail stores their
++ * ZX0 streams. Expand them here, before VM_init_bank() and before the Z80
++ * engine starts, so bank selection remains instantaneous during playback. */
++static int materialize_nemesis3_banks(KSS *kss, uint32_t header_size,
++                                      uint8_t *bank_data) {
++  const uint8_t *tail;
++  uint32_t tail_offset, length[3], compressed_size, i;
++  uint8_t *compressed;
++  const uint8_t *stream;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num != 3 || kss->load_adr != 0x0200 ||
++      kss->init_adr != 0x0200 || kss->play_adr != 0x5fe0)
++    return 1;
++
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 10 ||
++      memcmp(kss->data + tail_offset, "N3ZX", 4) != 0)
++    return 1;
++
++  tail = kss->data + tail_offset;
++  for (i = 0; i < 3; i++)
++    length[i] = (uint32_t)tail[4 + i * 2] |
++                ((uint32_t)tail[5 + i * 2] << 8);
++  compressed_size = length[0] + length[1] + length[2];
++  if (compressed_size < length[0] || compressed_size < length[1] ||
++      compressed_size < length[2] ||
++      compressed_size > kss->size - tail_offset - 10)
++    return 0;
++
++  /* A NULL destination is the validation pass performed before realloc(). */
++  if (!bank_data)
++    return 2;
++
++  /* Decoding bank 0 overwrites the tail, so preserve all streams first. */
++  compressed = malloc(compressed_size);
++  if (!compressed)
++    return 0;
++  memcpy(compressed, tail + 10, compressed_size);
++
++  stream = compressed;
++  if (!zx0_decompress_data(stream, length[0], bank_data, 0x4000)) {
++    free(compressed);
++    return 0;
++  }
++
++  /* All three Nemesis 3 banks share the lower 8K. Store that common half in
++   * each physical bank, then decode only the two distinct upper halves. */
++  memcpy(bank_data + 0x4000, bank_data, 0x2000);
++  memcpy(bank_data + 0x8000, bank_data, 0x2000);
++  stream += length[0];
++  if (!zx0_decompress_data(stream, length[1], bank_data + 0x6000, 0x2000)) {
++    free(compressed);
++    return 0;
++  }
++  stream += length[1];
++  if (!zx0_decompress_data(stream, length[2], bank_data + 0xa000, 0x2000)) {
++    free(compressed);
++    return 0;
++  }
++
++  free(compressed);
++  return 2;
++}
++
++/* QRTX is the private tail used by the compact Quarth KSSX builder. Quarth's
++ * two 16K banks share a 0x12D1-byte prefix, but it is not an 8K boundary. The
++ * tail stores that prefix once, followed by the used portions of bank 0 and
++ * bank 1. Rebuild the ordinary two-bank image before VM_init_bank(). */
++static int materialize_quarth_banks(KSS *kss, uint32_t header_size,
++                                     uint8_t *bank_data) {
++  const uint8_t *tail;
++  uint32_t tail_offset, length[3], compressed_size, i;
++  uint8_t *compressed;
++  const uint8_t *stream;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num != 2 || kss->bank_offset != 0 ||
++      kss->load_adr != 0x0200 || kss->init_adr != 0x0200 ||
++      kss->play_adr != 0x52df)
++    return 1;
++
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 10 ||
++      memcmp(kss->data + tail_offset, "QRTX", 4) != 0)
++    return 1;
++
++  tail = kss->data + tail_offset;
++  for (i = 0; i < 3; i++)
++    length[i] = (uint32_t)tail[4 + i * 2] |
++                ((uint32_t)tail[5 + i * 2] << 8);
++  compressed_size = length[0] + length[1] + length[2];
++  if (compressed_size < length[0] || compressed_size < length[1] ||
++      compressed_size < length[2] ||
++      compressed_size > kss->size - tail_offset - 10)
++    return 0;
++
++  if (!bank_data)
++    return 2;
++
++  /* Decoding into bank_data overwrites the QRTX tail in the expanded KSS
++   * allocation, so preserve every compressed stream first. */
++  compressed = malloc(compressed_size);
++  if (!compressed)
++    return 0;
++  memcpy(compressed, tail + 10, compressed_size);
++
++  memset(bank_data, 0, 2 * 0x4000);
++  stream = compressed;
++  if (!zx0_decompress_data(stream, length[0], bank_data, 0x12d1)) {
++    free(compressed);
++    return 0;
++  }
++  memcpy(bank_data + 0x4000, bank_data, 0x12d1);
++  stream += length[0];
++  if (!zx0_decompress_data(stream, length[1], bank_data + 0x12d1,
++                           0x2d29)) {
++    free(compressed);
++    return 0;
++  }
++  stream += length[1];
++  if (!zx0_decompress_data(stream, length[2], bank_data + 0x4000 + 0x12d1,
++                           0x2d29)) {
++    free(compressed);
++    return 0;
++  }
++
++  free(compressed);
++  return 2;
++}
++
++/* KCPX/KCPZ are generic page-1 containers for integrated Konami drivers.
++ * They store one common 16K template plus sparse per-song overlays. */
++static int apply_konami_page_overlay(uint8_t *output, const uint8_t *overlay,
++                                     uint32_t overlay_size) {
++  uint32_t cursor = 0;
++  while (cursor < overlay_size) {
++    uint32_t offset, length;
++    if (overlay_size - cursor < 4)
++      return 0;
++    offset = (uint32_t)overlay[cursor] |
++             ((uint32_t)overlay[cursor + 1] << 8);
++    length = (uint32_t)overlay[cursor + 2] |
++             ((uint32_t)overlay[cursor + 3] << 8);
++    cursor += 4;
++    if (offset + length > 0x4000 || cursor + length > overlay_size)
++      return 0;
++    memcpy(output + offset, overlay + cursor, length);
++    cursor += length;
++  }
++  return 1;
++}
++
++static int materialize_konami_complete_pages(KSS *kss,
++                                              uint32_t header_size,
++                                              uint8_t *bank_data,
++                                              KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint8_t *snapshot = NULL;
++  uint32_t tail_offset, tail_size, page_count, cursor, page, i;
++  uint32_t record_offset[0x80], record_size[0x80];
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num < 1 || kss->bank_num > 0x7f ||
++      kss->load_adr != 0x0200)
++    return 1;
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 528 ||
++      memcmp(kss->data + tail_offset, "KCPX", 4) != 0)
++    return 1;
++  tail = kss->data + tail_offset;
++  tail_size = kss->size - tail_offset;
++  page_count = tail[5];
++  if (tail[4] != 1 || page_count != kss->bank_num || tail[6] == 0 ||
++      ((uint32_t)tail[8] | ((uint32_t)tail[9] << 8)) != 0x4000 ||
++      528 + 0x4000 > tail_size)
++    return 0;
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[272 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++  cursor = 528 + 0x4000;
++  for (page = 0; page < page_count; page++) {
++    if (cursor + 2 > tail_size)
++      return 0;
++    record_size[page] = (uint32_t)tail[cursor] |
++                        ((uint32_t)tail[cursor + 1] << 8);
++    cursor += 2;
++    record_offset[page] = cursor;
++    if (cursor + record_size[page] > tail_size)
++      return 0;
++    cursor += record_size[page];
++  }
++  if (!bank_data)
++    return 2;
++  snapshot = malloc(tail_size);
++  if (!snapshot)
++    return 0;
++  memcpy(snapshot, tail, tail_size);
++  tail = snapshot;
++  for (page = 0; page < page_count; page++) {
++    uint8_t *output = bank_data + page * 0x4000;
++    memcpy(output, tail + 528, 0x4000);
++    if (!apply_konami_page_overlay(output, tail + record_offset[page],
++                                   record_size[page])) {
++      free(snapshot);
++      return 0;
++    }
++  }
++  free(snapshot);
++  return 2;
++}
++
++static int materialize_konami_compressed_pages(KSS *kss,
++                                                uint32_t header_size,
++                                                uint8_t *bank_data,
++                                                KSSPLAY *kssplay) {
++  const uint8_t *tail;
++  uint8_t *snapshot = NULL, *overlay = NULL;
++  uint32_t tail_offset, tail_size, page_count, template_size;
++  uint32_t template_offset, page, i;
++
++  if (!kss || !kss->kssx || kss->bank_mode != BANK_16K ||
++      kss->bank_num < 1 || kss->bank_num > 0x7f ||
++      kss->load_adr != 0x0200)
++    return 1;
++  tail_offset = header_size + kss->load_len;
++  if (tail_offset > kss->size || kss->size - tail_offset < 532 ||
++      memcmp(kss->data + tail_offset, "KCPZ", 4) != 0)
++    return 1;
++  tail = kss->data + tail_offset;
++  tail_size = kss->size - tail_offset;
++  page_count = tail[5];
++  template_size = (uint32_t)tail[528] | ((uint32_t)tail[529] << 8);
++  template_offset = (uint32_t)tail[530] | ((uint32_t)tail[531] << 8);
++  if (tail[4] != 1 || page_count != kss->bank_num || tail[6] == 0 ||
++      ((uint32_t)tail[8] | ((uint32_t)tail[9] << 8)) != 0x4000 ||
++      532 + page_count * 6 > tail_size ||
++      template_offset + template_size > tail_size)
++    return 0;
++  if (kssplay) {
++    memset(kssplay->quarth_song_page, 0xff,
++           sizeof(kssplay->quarth_song_page));
++    memset(kssplay->quarth_song_id, 0xff,
++           sizeof(kssplay->quarth_song_id));
++    for (i = 0; i < 256; i++) {
++      kssplay->quarth_song_id[i] = tail[16 + i];
++      kssplay->quarth_song_page[i] = tail[272 + i];
++    }
++    kssplay->quarth_complete_page = 1;
++  }
++  if (!bank_data)
++    return 2;
++  snapshot = malloc(tail_size);
++  overlay = malloc(0x10000);
++  if (!snapshot || !overlay) {
++    free(snapshot); free(overlay); return 0;
++  }
++  memcpy(snapshot, tail, tail_size);
++  tail = snapshot;
++  for (page = 0; page < page_count; page++) {
++    uint32_t descriptor = 532 + page * 6;
++    uint32_t raw_size = (uint32_t)tail[descriptor] |
++                        ((uint32_t)tail[descriptor + 1] << 8);
++    uint32_t packed_size = (uint32_t)tail[descriptor + 2] |
++                           ((uint32_t)tail[descriptor + 3] << 8);
++    uint32_t stream_offset = (uint32_t)tail[descriptor + 4] |
++                             ((uint32_t)tail[descriptor + 5] << 8);
++    uint8_t *output = bank_data + page * 0x4000;
++    if (raw_size > 0xffff || stream_offset + packed_size > tail_size ||
++        !zx0_decompress_data(tail + template_offset, template_size,
++                             output, 0x4000) ||
++        !zx0_decompress_data(tail + stream_offset, packed_size,
++                             overlay, raw_size) ||
++        !apply_konami_page_overlay(output, overlay, raw_size)) {
++      free(snapshot); free(overlay); return 0;
++    }
++  }
++  free(snapshot);
++  free(overlay);
++  return 2;
++}
++
++static int materialize_compressed_banks(KSS *kss, uint32_t header_size,
++                                         uint8_t *bank_data,
++                                         KSSPLAY *kssplay) {
++  int materialized = materialize_konami_compressed_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_konami_complete_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_salamander_compressed_complete_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_salamander_complete_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_quarth_compressed_complete_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_quarth_complete_pages(
++      kss, header_size, bank_data, kssplay);
++  if (materialized != 1)
++    return materialized;
++  materialized = materialize_nemesis3_banks(kss, header_size, bank_data);
++  if (materialized != 1)
++    return materialized;
++  return materialize_quarth_banks(kss, header_size, bank_data);
++}
++
++static int mgs_text_update(VM *vm, uint32_t a, uint32_t d) {
    char buf[128] = "";
    int adr, i, j;
-@@ -111,9 +162,14 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+ 
+@@ -78,21 +901,27 @@ static inline int32_t apply_volume(int32_t data, int32_t vol) {
+   return (data * volume_table[(uint32_t)(vol & (KSSPLAY_MUTE - 1))]) >> 12;
+ }
+ 
+-int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+-  uint32_t logical_size, header_size;
+-  int i;
++int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
++  uint32_t logical_size, header_size;
++  int materialized;
++  int i;
+ 
+   if (kss->kssx && 0 < kss->extra_size) {
+     header_size = 16 + kss->extra_size;
+     for (i = 0; i < KSS_DEVICE_MAX; i++) {
+       kssplay->device_volume[i] = (kss->vol[i] << (KSSPLAY_VOL_BITS - 8));
+     }
+-  } else {
++  } else {
+     header_size = 16;
+     for (i = 0; i < KSS_DEVICE_MAX; i++) {
+       kssplay->device_volume[i] = 0;
+-    }
+-  }
++    }
++  }
++
++  kssplay->quarth_complete_page = 0;
++  materialized = materialize_compressed_banks(kss, header_size, NULL, kssplay);
++  if (materialized == 0)
++    return -1;
+ 
+   /* Prevent buffer over run when KSS HEADER is inconsistent for its data size. */
+   if (kss->bank_mode == BANK_16K) {
+@@ -104,16 +933,26 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+ 
+   kssplay->kss = kss;
+ 
+-  kssplay->main_data = kss->data + header_size;
+-  kssplay->bank_data = kssplay->main_data + kss->load_len;
++  kssplay->main_data = kss->data + header_size;
++  kssplay->bank_data = kssplay->main_data + kss->load_len;
++
++  if (materialized == 2 &&
++      materialize_compressed_banks(kss, header_size, kssplay->bank_data,
++                                   kssplay) == 0)
++    return -1;
+ 
+   switch (kss->type) {
    case MBMDATA:
      kssplay->vm->scc_disable = 1;
      break;
@@ -93,7 +915,7 @@ index bce81b5..a9b0cb7 100644
    default:
      kssplay->vm->scc_disable = 0;
      break;
-@@ -124,7 +180,7 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
+@@ -124,7 +963,7 @@ int KSSPLAY_set_data(KSSPLAY *kssplay, KSS *kss) {
    return 0;
  }
  
@@ -102,7 +924,7 @@ index bce81b5..a9b0cb7 100644
    if (kssplay->cpu_speed == 0) {
      if (kssplay->kss->fmpac || kssplay->kss->msx_audio) {
        return MSX_CLK * 2; /* 7.16MHz */
-@@ -135,10 +191,36 @@ static uint32_t getclk(KSSPLAY *kssplay) {
+@@ -135,10 +974,36 @@ static uint32_t getclk(KSSPLAY *kssplay) {
    if (kssplay->cpu_speed <= 8) {
      return MSX_CLK * kssplay->cpu_speed;
    }
@@ -143,7 +965,7 @@ index bce81b5..a9b0cb7 100644
    strncpy(buf, mgs_text, max);
    buf[max - 1] = '\0';
  }
-@@ -169,18 +251,30 @@ void KSSPLAY_set_device_type(KSSPLAY *kssplay, KSS_DEVICE device, uint32_t type)
+@@ -169,33 +1034,94 @@ void KSSPLAY_set_device_type(KSSPLAY *kssplay, KSS_DEVICE device, uint32_t type)
    kssplay->device_type[device] = type;
  }
  
@@ -160,6 +982,11 @@ index bce81b5..a9b0cb7 100644
 -  if (kssplay->vsync_freq == 0) {
 -    kssplay->vsync_freq = kssplay->kss->pal_mode ? PAL_FREQ : NTSC_FREQ;
 -  }
+-
+-  VM_init_memory(kssplay->vm, kssplay->kss->ram_mode, kssplay->kss->load_adr, kssplay->kss->load_len,
+-                 kssplay->main_data);
+-  VM_init_bank(kssplay->vm, kssplay->kss->bank_mode, kssplay->kss->bank_num, kssplay->kss->bank_offset,
+-               kssplay->bank_data);
 +  kssplay->cpu_speed = cpu_speed;
 +
 +  kssplay->mbwave_timing = (uint8_t)is_mbwave_kss(kssplay);
@@ -177,10 +1004,52 @@ index bce81b5..a9b0cb7 100644
 +    if (kssplay->vsync_freq == 0.0)
 +      kssplay->vsync_freq = kssplay->kss->pal_mode ? PAL_FREQ : NTSC_FREQ;
 +  }
++
++  {
++    uint32_t logical_offset = is_quarth_map_kss(kssplay)
++                                  ? 0
++                                  : kssplay->kss->bank_offset;
++    uint32_t physical_offset = kssplay->mapper_base_set
++                                    ? kssplay->mapper_base
++                                    : kssplay->kss->bank_offset;
++
++    /* Quarth's ENGINE_MAP_DATA gateway is RST 28H. The VM installs the host
++     * equivalent gateway before the Z80 starts, while normal KSS files keep
++     * the legacy direct selector behavior. */
++    VM_set_map_request(kssplay->vm, is_quarth_map_kss(kssplay));
++    VM_init_memory(kssplay->vm, kssplay->kss->ram_mode,
++                   kssplay->kss->load_adr, kssplay->kss->load_len,
++                   kssplay->main_data);
++    VM_init_bank_mapped(kssplay->vm, kssplay->kss->bank_mode,
++                        kssplay->kss->bank_num, logical_offset,
++                        physical_offset, kssplay->bank_data);
++    if (kssplay->quarth_complete_page) {
++      uint32_t selected = song & 0xff;
++      uint32_t page = kssplay->quarth_song_page[selected];
++      uint32_t bank;
++      /* QCPX keeps Quarth's relocated work area in the selected complete
++       * page. Mapper RAM is writable on a real MSX, so model that here too. */
++      for (bank = 0; bank < kssplay->kss->bank_num; bank++)
++        MMAP_set_bank_attr(kssplay->vm->mmap, VM_BANK_SLOT,
++                           physical_offset + bank,
++                           BANK_READABLE | BANK_WRITEABLE);
++      if (page >= kssplay->kss->bank_num)
++        page = 0;
++      VM_set_bank_window(kssplay->vm, 2, page);
++      song = kssplay->quarth_song_id[selected];
++      if (song == 0xff)
++        song = 0;
++    }
++  }
++
++  /* The compact KSSX bootstrap expands its bank through SCC-mapped RAM.
++   * Ignore SCC address interception while the loader/decoder executes, then
++   * let the original engine program the SCC normally. */
++  VM_set_SCC_loader_range(kssplay->vm, 0x0200,
++                          compact_kssx_loader_end(kssplay));
  
-   VM_init_memory(kssplay->vm, kssplay->kss->ram_mode, kssplay->kss->load_adr, kssplay->kss->load_len,
-                  kssplay->main_data);
-@@ -192,10 +286,21 @@ void KSSPLAY_reset(KSSPLAY *kssplay, uint32_t song, uint32_t cpu_speed) {
+   for (i = 0; i < KSS_DEVICE_MAX; i++) {
+     KSSPLAY_set_device_type(kssplay, i, kssplay->device_type[i]);
    }
  
    VM_reset_device(kssplay->vm);
@@ -206,7 +1075,16 @@ index bce81b5..a9b0cb7 100644
    kssplay->fade_flag = 0;
  
    kssplay->step_inc = (double)kssplay->vm->clock / kssplay->rate;
-@@ -459,11 +564,12 @@ static inline void process_vm(KSSPLAY *kssplay) {
+@@ -211,7 +1137,7 @@ void KSSPLAY_reset(KSSPLAY *kssplay, uint32_t song, uint32_t cpu_speed) {
+   PSG_RateConv_reset(kssplay->psg_rconv, kssplay->vm->psg, kssplay->rate);
+ }
+ 
+-KSSPLAY *KSSPLAY_new(uint32_t rate, uint32_t nch, uint32_t bps) {
++KSSPLAY *KSSPLAY_new(uint32_t rate, uint32_t nch, uint32_t bps) {
+   KSSPLAY *kssplay;
+   int i, j;
+ 
+@@ -459,11 +1385,19 @@ static inline void process_vm(KSSPLAY *kssplay) {
    if (step_int > 0) {
      kssplay->step_cnt -= step_int;
      //VM_exec might execute more than step_int cycles
@@ -221,10 +1099,17 @@ index bce81b5..a9b0cb7 100644
 +    mbwave_sync_frequency(kssplay);
 +  }
 +}
++
++void KSSPLAY_set_mapper_base(KSSPLAY *kssplay, uint32_t mapper_base) {
++  if (!kssplay || mapper_base > 0xff)
++    return;
++  kssplay->mapper_base = (uint8_t)mapper_base;
++  kssplay->mapper_base_set = 1;
++}
  
  static inline void calc_per_ch(KSSPLAY *kssplay, KSSPLAY_PER_CH_OUT *out) {
  
-@@ -521,11 +627,19 @@ static inline void calc_mono(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
+@@ -521,11 +1455,19 @@ static inline void calc_mono(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
    for (i = 0; i < length; i++) {
      process_vm(kssplay);
  
@@ -249,7 +1134,7 @@ index bce81b5..a9b0cb7 100644
  
      if (kssplay->kss->fmpac && !kssplay->device_mute[KSS_DEVICE_OPLL]) {
        d += apply_volume(FIR_calc(kssplay->device_fir[0][KSS_DEVICE_OPLL], OPLL_calc(kssplay->vm->opll)), volume[KSS_DEVICE_OPLL]);
-@@ -574,12 +688,21 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
+@@ -574,12 +1516,21 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
    for (i = 0; i < length; i++) {
      process_vm(kssplay);
  
@@ -277,7 +1162,7 @@ index bce81b5..a9b0cb7 100644
  
      if (kssplay->kss->fmpac && !kssplay->device_mute[KSS_DEVICE_OPLL]) {
        if (kssplay->opll_stereo) {
-@@ -667,7 +790,7 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
+@@ -667,7 +1618,7 @@ static inline void calc_stereo(KSSPLAY *kssplay, int16_t *buf, uint32_t length)
    }
  }
  
@@ -286,7 +1171,7 @@ index bce81b5..a9b0cb7 100644
    if (kssplay->nch == 1) {
      calc_mono(kssplay, buf, length);
    } else {
-@@ -676,7 +799,20 @@ void KSSPLAY_calc(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
+@@ -676,7 +1627,20 @@ void KSSPLAY_calc(KSSPLAY *kssplay, int16_t *buf, uint32_t length) {
  
    kssplay->decoded_length += length;
    LPDETECT_update(kssplay->vm->lpde, kssplay->decoded_length * 1000 / kssplay->rate, 30 * 1000, 1000);
@@ -308,13 +1193,46 @@ index bce81b5..a9b0cb7 100644
  
  void KSSPLAY_calc_silent(KSSPLAY *kssplay, uint32_t length) {
    uint32_t i;
+@@ -750,11 +1714,19 @@ void KSSPLAY_set_iowrite_handler(KSSPLAY *kssplay, void *context,
+   kssplay->vm->iowrite_handler_context = context ? context : kssplay;
+   kssplay->vm->iowrite_handler = (void (*)(void *, uint32_t, uint32_t))handler;
+ }
+-void KSSPLAY_set_memwrite_handler(KSSPLAY *kssplay, void *context,
+-                                  void (*handler)(void *context, uint32_t a, uint32_t d)) {
++void KSSPLAY_set_memwrite_handler(KSSPLAY *kssplay, void *context,
++                                  void (*handler)(void *context, uint32_t a, uint32_t d)) {
+   kssplay->vm->memwrite_handler_context = context ? context : kssplay;
+   kssplay->vm->memwrite_handler = (void (*)(void *, uint32_t, uint32_t))handler;
+-}
++}
++
++void KSSPLAY_set_memread_handler(KSSPLAY *kssplay, void *context,
++                                 void (*handler)(void *context, uint32_t a, uint32_t d)) {
++  if (!kssplay || !kssplay->vm)
++    return;
++  kssplay->vm->memread_handler_context = context;
++  kssplay->vm->memread_handler = handler;
++}
+ 
+ void KSSPLAY_write_io(KSSPLAY *kssplay, uint32_t a, uint32_t d) { VM_write_io(kssplay->vm, a, d); }
+ 
 diff --git a/src/kssplay.h b/src/kssplay.h
-index a6feec1..864d04f 100644
+index a6feec1..d924788 100644
 --- a/src/kssplay.h
 +++ b/src/kssplay.h
-@@ -29,7 +29,8 @@ struct tagKSSPLAY {
-   uint8_t *main_data;
-   uint8_t *bank_data;
+@@ -26,10 +26,16 @@ typedef struct tagKSSPLAY KSSPLAY;
+ struct tagKSSPLAY {
+   KSS *kss;
+ 
+-  uint8_t *main_data;
+-  uint8_t *bank_data;
++  uint8_t *main_data;
++  uint8_t *bank_data;
++  uint8_t mapper_base;
++  uint8_t mapper_base_set;
++  uint8_t quarth_complete_page;
++  uint8_t quarth_song_page[256];
++  uint8_t quarth_song_id[256];
  
 -  VM *vm;
 +  VM *vm;
@@ -322,7 +1240,7 @@ index a6feec1..864d04f 100644
  
    uint32_t rate;
    uint32_t nch;
-@@ -56,7 +57,12 @@ struct tagKSSPLAY {
+@@ -56,7 +62,12 @@ struct tagKSSPLAY {
    int32_t decoded_length;
  
    uint32_t cpu_speed; /* 0: AutoDetect, 1...N: x1 ... xN */
@@ -336,7 +1254,21 @@ index a6feec1..864d04f 100644
  
    int scc_disable;
    int opll_stereo;
-@@ -163,8 +169,12 @@ void KSSPLAY_set_silent_limit(KSSPLAY *kssplay, uint32_t time_in_ms);
+@@ -116,7 +127,12 @@ int KSSPLAY_set_data(KSSPLAY *, KSS *kss);
+ /* Reset KSSPLAY object */
+ /* cpu_speed = 0:auto 1:3.58MHz 2:7.16MHz ... */
+ /* scc_type = 0:auto 1: standard 2:enhanced */
+-void KSSPLAY_reset(KSSPLAY *, uint32_t song, uint32_t cpu_speed);
++void KSSPLAY_reset(KSSPLAY *, uint32_t song, uint32_t cpu_speed);
++
++/* Select the physical mapper segment where bank 0 is materialized. The
++ * engine-facing selector remains logical; this is useful for MSX-style
++ * players whose DOS2 allocations do not start at the KSS header offset. */
++void KSSPLAY_set_mapper_base(KSSPLAY *, uint32_t mapper_base);
+ 
+ /* Calcurate wave samples as int16 array */
+ void KSSPLAY_calc(KSSPLAY *, int16_t *buf, uint32_t length);
+@@ -163,8 +179,14 @@ void KSSPLAY_set_silent_limit(KSSPLAY *kssplay, uint32_t time_in_ms);
  
  void KSSPLAY_set_iowrite_handler(KSSPLAY *kssplay, void *context,
                                   void (*handler)(void *context, uint32_t a, uint32_t d));
@@ -344,6 +1276,8 @@ index a6feec1..864d04f 100644
 -                                  void (*handler)(void *context, uint32_t a, uint32_t d));
 +void KSSPLAY_set_memwrite_handler(KSSPLAY *kssplay, void *context,
 +                                  void (*handler)(void *context, uint32_t a, uint32_t d));
++void KSSPLAY_set_memread_handler(KSSPLAY *kssplay, void *context,
++                                 void (*handler)(void *context, uint32_t a, uint32_t d));
 +
 +/* Attach an optional raw MoonSound/YMF278B device. It receives the MSX
 + * MoonSound ports and is mixed into the normal KSS output. */
@@ -352,10 +1286,10 @@ index a6feec1..864d04f 100644
  uint32_t KSSPLAY_get_device_volume(KSSPLAY *kssplay, KSS_DEVICE device);
  void KSSPLAY_get_MGStext(KSSPLAY *kssplay, char *buf, int max);
 diff --git a/src/vm/vm.c b/src/vm/vm.c
-index 9d2f47f..02baaea 100644
+index 9d2f47f..963fe2b 100644
 --- a/src/vm/vm.c
 +++ b/src/vm/vm.c
-@@ -13,12 +13,14 @@
+@@ -13,16 +13,46 @@
  #include "vm.h"
  
  /* Callback functions from KMZ80 */
@@ -366,8 +1300,31 @@ index 9d2f47f..02baaea 100644
 -
 -  if (vm->memwrite_handler) {
 +static uint32_t memread(VM *vm, uint32_t a) {
-+  return MMAP_read_memory(vm->mmap, a);
++  uint32_t value = MMAP_read_memory(vm->mmap, a);
++  if (vm->memread_handler)
++    vm->memread_handler(vm->memread_handler_context, a, value);
++  return value;
 +}
++
++static uint32_t map_bank_selector(VM *vm, uint32_t logical_bank) {
++  if (logical_bank < vm->bank_logical_min ||
++      logical_bank >= vm->bank_logical_max)
++    return VM_INVALID_ADDRESS;
++  return vm->bank_map[logical_bank - vm->bank_logical_min];
++}
++
++void VM_set_bank_window(VM *vm, uint32_t page, uint32_t logical_bank) {
++  uint32_t bank;
++
++  if (!vm || vm->bank_mode != BANK_16K || page > 6 || (page & 1))
++    return;
++  bank = map_bank_selector(vm, logical_bank);
++  if (bank == VM_INVALID_ADDRESS)
++    return;
++  vm->bank_window_page = page;
++  MMAP_select_bank(vm->mmap, page, VM_BANK_SLOT, bank);
++}
++
 +static void memwrite(VM *vm, uint32_t a, uint32_t d) {
 +  uint32_t page = a >> 13;
 +
@@ -376,7 +1333,30 @@ index 9d2f47f..02baaea 100644
      vm->memwrite_handler(vm->memwrite_handler_context, a, d);
    }
  
-@@ -48,8 +50,12 @@ static void memwrite(VM *vm, uint32_t a, uint32_t d) {
+-  if (!vm->scc_disable) {
++  int scc_loader_write =
++      vm->scc_loader_end > vm->scc_loader_start &&
++      vm->context.t_pc >= vm->scc_loader_start &&
++      vm->context.t_pc < vm->scc_loader_end;
++
++  if (!vm->scc_disable && !scc_loader_write) {
+     if (vm->scc_type == VM_SCC_AUTO && (a == 0x9000 || a == 0xB000 || a == 0xBFFE)) {
+       if (a == 0x9000 && d != 0x00)
+         SCC_write(vm->scc, a, 0x3f);
+@@ -40,16 +70,22 @@ static void memwrite(VM *vm, uint32_t a, uint32_t d) {
+     LPDETECT_write(vm->lpde, a, d);
+   }
+ 
+-  if ((vm->bank_mode == BANK_8K) && ((a == 0x9000) || (a == 0xB000))) {
+-    MMAP_select_bank(vm->mmap, page, VM_BANK_SLOT, d);
+-  }
++  if ((vm->bank_mode == BANK_8K) && ((a == 0x9000) || (a == 0xB000))) {
++    uint32_t bank = map_bank_selector(vm, d);
++    if (bank != VM_INVALID_ADDRESS)
++      MMAP_select_bank(vm->mmap, page, VM_BANK_SLOT, bank);
++  }
+ 
+   MMAP_write_memory(vm->mmap, a, d);
  
  }
  
@@ -391,7 +1371,7 @@ index 9d2f47f..02baaea 100644
  
    if ((vm->psg) && ((a & 0xff) == 0xA2))
      return PSG_readIO(vm->psg);
-@@ -64,9 +70,12 @@ static uint32_t ioread(VM *vm, uint32_t a) {
+@@ -64,9 +100,12 @@ static uint32_t ioread(VM *vm, uint32_t a) {
  static void iowrite(VM *vm, uint32_t a, uint32_t d) {
    a &= 0xff;
  
@@ -407,7 +1387,37 @@ index 9d2f47f..02baaea 100644
  
    if (((a == STOPIO) || (a == LOOPIO) || (a == ADRLIO) || (a == ADRHIO)) && (vm->IO[EXTIO] != 0x7f)) {
      return;
-@@ -210,11 +219,19 @@ void VM_delete(VM *vm) {
+@@ -136,12 +175,13 @@ static void iowrite(VM *vm, uint32_t a, uint32_t d) {
+     break;
+   }
+ 
+-  if ((vm->bank_mode == BANK_16K) && (a == 0xfe)) {
+-    if ((vm->bank_min <= d) && (d < vm->bank_max))
+-      MMAP_select_bank(vm->mmap, 4, VM_BANK_SLOT, d);
+-    else
+-      MMAP_select_bank(vm->mmap, 4, VM_MAIN_SLOT, 2);
+-  }
++  if ((vm->bank_mode == BANK_16K) && (a == 0xfe)) {
++    uint32_t bank = map_bank_selector(vm, d);
++    if (bank != VM_INVALID_ADDRESS)
++      MMAP_select_bank(vm->mmap, vm->bank_window_page, VM_BANK_SLOT, bank);
++    else
++      MMAP_select_bank(vm->mmap, 4, VM_MAIN_SLOT, 2);
++  }
+ }
+ 
+ static uint32_t busread(VM *vm, uint32_t mode) { return 0x38; }
+@@ -188,7 +228,8 @@ VM *VM_new(int rate) {
+   vm->lpde = LPDETECT_new();
+   vm->ram_mode = 0;
+   vm->DA8_enable = 0;
+-  vm->bank_mode = BANK_16K;
++  vm->bank_mode = BANK_16K;
++  vm->bank_window_page = 4;
+   vm->psg_type = VM_PSG_AUTO;
+   vm->scc_type = VM_SCC_AUTO;
+   vm->opll_type = VM_OPLL_2413;
+@@ -210,11 +251,19 @@ void VM_delete(VM *vm) {
    free(vm);
  }
  
@@ -429,7 +1439,25 @@ index 9d2f47f..02baaea 100644
  
  void VM_set_clock(VM *vm, uint32_t clock, double vsync_freq) {
    vm->clock = clock;
-@@ -336,11 +353,15 @@ void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t size, u
+@@ -280,9 +329,14 @@ void VM_set_OPLL_type(VM *vm, uint32_t opll_type) {
+   vm->opll_type = opll_type;
+ }
+ 
+-void VM_set_OPL_type(VM *vm, uint32_t opl_type) { vm->opl_type = opl_type; }
+-
+-void VM_reset(VM *vm, uint32_t clock, uint32_t init_adr, uint32_t vsync_adr, double vsync_freq, uint32_t song,
++void VM_set_OPL_type(VM *vm, uint32_t opl_type) { vm->opl_type = opl_type; }
++
++void VM_set_SCC_loader_range(VM *vm, uint32_t start, uint32_t end) {
++  vm->scc_loader_start = start;
++  vm->scc_loader_end = end;
++}
++
++void VM_reset(VM *vm, uint32_t clock, uint32_t init_adr, uint32_t vsync_adr, double vsync_freq, uint32_t song,
+               uint32_t DA8) {
+   /* Reset KMZ80 */
+   kmz80_reset(&vm->context);
+@@ -336,11 +390,21 @@ void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t size, u
      return;
    }
  
@@ -444,13 +1472,86 @@ index 9d2f47f..02baaea 100644
 +  memcpy(main_memory + 0x09, "\xD3\xA0\xDB\xA2\xC9", 5);
 +  /* RSLREG (0138H) must return a defined primary-slot register value. */
 +  memcpy(main_memory + 0x138, "\xAF\xC9", 2);
++  /* ENGINE_MAP_DATA requests are made with the user-reserved RST 28H. The
++   * host VM exposes the same logical request gateway as the MSX player:
++   * OUT (FEH),A followed by RET. The OUT is still translated by
++   * map_bank_selector(), so the engine never knows the physical segment. */
++  if (vm->map_request_enabled)
++    memcpy(main_memory + 0x28, "\xD3\xFE\xC9", 3);
 +  memset(main_memory + 0x4000, 0, 0xC000);
 +  /* MBWave copies this five-byte return stub through its MSX work area. */
 +  memset(main_memory + 0xFD9A, 0xC9, 5);
    if ((offset + size) > 0x10000)
      size = 0x10000 - offset;
    memcpy(main_memory + offset, data, size);
-@@ -386,4 +407,4 @@ void VM_write_memory(VM *vm, uint32_t a, uint32_t d) {
+@@ -357,28 +421,48 @@ void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t size, u
+   free(main_memory);
+ }
+ 
+-void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t *data) {
+-  uint32_t size, i;
++void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t *data) {
++  VM_init_bank_mapped(vm, mode, num, offset, offset, data);
++}
++
++void VM_init_bank_mapped(VM *vm, uint32_t mode, uint32_t num,
++                         uint32_t logical_offset, uint32_t physical_offset,
++                         uint8_t *data) {
++  uint32_t size, i;
+ 
+   assert(vm);
+   assert(vm->mmap);
+ 
+-  vm->bank_mode = mode;
+-  vm->bank_min = offset;
+-  vm->bank_max = offset + num;
+-
+-  if (mode == BANK_16K) {
+-    size = 0x4000;
+-    for (i = 0; i < num; i++)
+-      MMAP_set_bank_data(vm->mmap, VM_BANK_SLOT, i + offset, BANK_16K, data + i * size);
+-  } else if (mode == BANK_8K) {
+-    size = 0x2000;
+-    for (i = 0; i < num; i++)
+-      MMAP_set_bank_data(vm->mmap, VM_BANK_SLOT, i + offset, BANK_8K, data + i * size);
+-  } else {
+-    assert(0);
+-  }
+-}
++  if (logical_offset + num > 0x100 || physical_offset + num > 0x100)
++    return;
++
++  vm->bank_mode = mode;
++  vm->bank_logical_min = logical_offset;
++  vm->bank_logical_max = logical_offset + num;
++  vm->bank_min = physical_offset;
++  vm->bank_max = physical_offset + num;
++  for (i = 0; i < num; i++)
++    vm->bank_map[i] = (uint8_t)(physical_offset + i);
++
++  if (mode == BANK_16K) {
++    size = 0x4000;
++    for (i = 0; i < num; i++)
++      MMAP_set_bank_data(vm->mmap, VM_BANK_SLOT, physical_offset + i,
++                         BANK_16K, data + i * size);
++  } else if (mode == BANK_8K) {
++    size = 0x2000;
++    for (i = 0; i < num; i++)
++      MMAP_set_bank_data(vm->mmap, VM_BANK_SLOT, physical_offset + i,
++                         BANK_8K, data + i * size);
++  } else {
++    assert(0);
++  }
++}
++
++void VM_set_map_request(VM *vm, uint32_t enabled) {
++  if (vm)
++    vm->map_request_enabled = enabled != 0;
++}
+ 
+ void VM_write_memory(VM *vm, uint32_t a, uint32_t d) {
+   memwrite(vm, a, d);
+@@ -386,4 +470,4 @@ void VM_write_memory(VM *vm, uint32_t a, uint32_t d) {
  
  void VM_write_io(VM *vm, uint32_t a, uint32_t d) {
    iowrite(vm, a, d);
@@ -458,26 +1559,68 @@ index 9d2f47f..02baaea 100644
 \ No newline at end of file
 +}
 diff --git a/src/vm/vm.h b/src/vm/vm.h
-index 6ddf0e3..2c25647 100644
+index 6ddf0e3..5ea411e 100644
 --- a/src/vm/vm.h
 +++ b/src/vm/vm.h
-@@ -62,9 +62,12 @@ struct tagVM {
+@@ -40,11 +40,18 @@ struct tagVM {
+   uint32_t clock; /* CPU clock */
+   uint32_t vsync_cycles;
+ 
+-  uint32_t bank_mode;
+-  uint32_t bank_min;
+-  uint32_t bank_max;
+-  uint32_t ram_mode;
+-  uint32_t scc_disable;
++  uint32_t bank_mode;
++  uint32_t bank_logical_min;
++  uint32_t bank_logical_max;
++  uint32_t bank_min;
++  uint32_t bank_max;
++  uint8_t bank_map[256];
++  uint32_t bank_window_page; /* 16K mapper window: 2=4000H, 4=8000H. */
++  uint8_t map_request_enabled;
++  uint32_t ram_mode;
++  uint32_t scc_disable;
++  uint32_t scc_loader_start;
++  uint32_t scc_loader_end;
+   uint32_t psg_type;
+   uint32_t scc_type;
+   uint32_t opll_type;
+@@ -62,11 +69,16 @@ struct tagVM {
  
    void *fp;
  
 -  void *iowrite_handler_context;
 -  void (*iowrite_handler)(void *context, uint32_t a, uint32_t d);
 -  void *memwrite_handler_context;
+-  void (*memwrite_handler)(void *context, uint32_t a, uint32_t d);
+-};
 +  void *iowrite_handler_context;
 +  void (*iowrite_handler)(void *context, uint32_t a, uint32_t d);
 +  void *moonsound_context;
 +  void (*moonsound_write)(void *context, uint32_t a, uint32_t d);
 +  uint32_t (*moonsound_read)(void *context, uint32_t a);
 +  void *memwrite_handler_context;
-   void (*memwrite_handler)(void *context, uint32_t a, uint32_t d);
- };
++  void (*memwrite_handler)(void *context, uint32_t a, uint32_t d);
++  void *memread_handler_context;
++  void (*memread_handler)(void *context, uint32_t a, uint32_t d);
++};
  
-@@ -87,7 +90,10 @@ void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t
+ #define MSX_CLK (3579545)
+ 
+@@ -82,15 +94,24 @@ void VM_delete(VM *vm);
+ void VM_reset_device(VM *vm);
+ void VM_reset(VM *vm, uint32_t cpu_clk, uint32_t pc, uint32_t play_adr, double vsync_freq, uint32_t song,
+               uint32_t DA8);
+-void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t num, uint8_t *data);
+-void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t *data);
++void VM_init_memory(VM *vm, uint32_t ram_mode, uint32_t offset, uint32_t num, uint8_t *data);
++void VM_init_bank(VM *vm, uint32_t mode, uint32_t num, uint32_t offset, uint8_t *data);
++void VM_init_bank_mapped(VM *vm, uint32_t mode, uint32_t num,
++                         uint32_t logical_offset, uint32_t physical_offset,
++                         uint8_t *data);
++void VM_set_bank_window(VM *vm, uint32_t page, uint32_t logical_bank);
++void VM_set_map_request(VM *vm, uint32_t enabled);
  uint32_t VM_exec(VM *vm, uint32_t cycles);
  void VM_exec_func(VM *vm, uint32_t init_adr);
  void VM_set_clock(VM *vm, uint32_t clock, double vsync_freq);
@@ -488,4 +1631,10 @@ index 6ddf0e3..2c25647 100644
 +                      uint32_t (*read)(void *context, uint32_t a));
  
  void VM_set_PSG_type(VM *vm, uint32_t psg_type);
- void VM_set_SCC_type(VM *vm, uint32_t scc_type);
+-void VM_set_SCC_type(VM *vm, uint32_t scc_type);
++void VM_set_SCC_type(VM *vm, uint32_t scc_type);
++void VM_set_SCC_loader_range(VM *vm, uint32_t start, uint32_t end);
+ void VM_set_OPLL_type(VM *vm, uint32_t opll_type);
+ void VM_set_OPL_type(VM *vm, uint32_t opl_type);
+ 
+
