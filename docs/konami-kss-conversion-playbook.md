@@ -506,3 +506,53 @@ The difficult part is not copying bytes; it is classifying which words are
 addresses and which words are musical data. A manifest plus an emulation trace
 keeps that judgment explicit and gives an empty context enough evidence to
 continue without rediscovering the whole engine.
+
+## Generic one-page containers (KCPX/KCPZ)
+
+`tools/build_konami_complete_pages.py` builds the integrated non-banked packs;
+`tools/build_konami_banked_complete_pages.py` handles layouts that already use
+KSS mapper banks. Both write the private `KCPX` (raw) or `KCPZ` (ZX0) format.
+The file contains one common 16K page-1 template plus a sparse overlay for each
+public, contiguous song ID. The original sparse song ID is retained in the
+logical-to-original table and is restored by a KCP-aware player before INIT.
+The compressed and uncompressed variants must materialize byte-identical page
+images; always verify that parity separately from comparison with the source.
+
+Current rebuild commands are:
+
+```sh
+python3 tools/build_konami_complete_pages.py nemesis2
+python3 tools/build_konami_complete_pages.py parodius
+python3 tools/build_konami_complete_pages.py contra
+python3 tools/build_konami_complete_pages.py kingsvalley2
+python3 tools/build_konami_complete_pages.py spacemanbow
+python3 tools/build_konami_banked_complete_pages.py f1spirit
+python3 tools/build_konami_banked_complete_pages.py nemesis3
+python3 tools/build_konami_banked_complete_pages.py solidsnake
+python3 tools/build_konami_banked_complete_pages.py sdsnatch
+```
+
+As of the latest trace pass, Nemesis 2 has 17/17 active songs and is exact at
+the short comparison point; its full-duration count differs only at the final
+measurement boundary for two songs. Parodius is 14/14 exact for the complete
+duration. F-1 Spirit and Nemesis 3 now have genuine one-page variants rather
+than only their older banked 16K conversions. Contra, King's Valley 2, Space
+Manbow, Solid Snake, and SD Snatcher produce active KCP images with exact
+compressed/raw parity, but are still experimental: indirect instrument,
+effect, or stream pointers diverge from the source and must not be reported as
+finished merely because audio starts.
+
+Do not discard reads in `9800H..98FFH` while constructing a page. Code literals
+that address this range are SCC hardware references and stay physical, but a
+getraced data read at the same virtual address can refer to selected music
+bytes in libkss's combined memory model. Classify code operands and data reads
+separately.
+
+Snatcher needs a multi-page extension to the one-page method. Its longest real
+track reads about 12.4 KiB of selected bank data while the required engine and
+writable state exceed the remaining space. A correct solution duplicates the
+same resident engine addresses in multiple logical page-1 images and switches
+between those images only at explicit stream-map gateways. KCP's common
+template prevents duplicate engine bytes on disk, but an MSX player may need
+more than one allocated mapper segment for that track. Do not truncate the
+trace or silently omit the late stream data to force it into 16 KiB.

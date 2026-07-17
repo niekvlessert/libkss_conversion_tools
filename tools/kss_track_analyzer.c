@@ -13,6 +13,10 @@
 #define MAX_COMBINATIONS 512
 #define DEFAULT_SECONDS 5
 
+static int analysis_seconds_cap;
+static int probe_address = -1;
+static int probe_length;
+
 typedef struct {
   int id;
   int seconds;
@@ -30,10 +34,18 @@ typedef struct {
   int page5[MAX_COMBINATIONS];
   int combination_count;
   int bank16[MAX_COMBINATIONS];
+  int bank16_pc[MAX_COMBINATIONS];
   int bank16_count;
+  unsigned char executed[0x10000];
+  unsigned char data_reads[0x10000];
+  unsigned char memory_writes[0x10000];
+  unsigned char loaded_reads[0x10000];
   unsigned char music_reads[0x10000];
+  unsigned char *bank_reads;
+  unsigned int bank_read_size;
   unsigned long scc_writes;
   unsigned long psg_writes;
+  unsigned char scc_write_pcs[0x10000];
 } TRACE;
 
 static char *trim(char *text) {
@@ -69,13 +81,22 @@ static void add_16k_bank(TRACE *trace, int bank) {
     return;
   for (i = 0; i < trace->bank16_count; i++)
     if (trace->bank16[i] == bank) return;
-  if (trace->bank16_count < MAX_COMBINATIONS)
-    trace->bank16[trace->bank16_count++] = bank;
+  if (trace->bank16_count < MAX_COMBINATIONS) {
+    trace->bank16[trace->bank16_count] = bank;
+    trace->bank16_pc[trace->bank16_count] = trace->player
+        ? (int)(trace->player->vm->context.t_pc & 0xffff) : -1;
+    trace->bank16_count++;
+  }
 }
 
 static void memory_write(void *context, uint32_t address, uint32_t value) {
   TRACE *trace = (TRACE *)context;
-  if (0x9800 <= address && address <= 0x98ff) trace->scc_writes++;
+  trace->memory_writes[address & 0xffff] = 1;
+  if (0x9800 <= address && address <= 0x98ff) {
+    trace->scc_writes++;
+    if (trace->player)
+      trace->scc_write_pcs[trace->player->vm->context.t_pc & 0xffff] = 1;
+  }
   if (!trace->kss || trace->kss->bank_mode != KSS_8K) return;
   if (address == 0x9000) {
     trace->current_page4 = (int)value;
@@ -99,11 +120,55 @@ static void memory_read(void *context, uint32_t address, uint32_t value) {
   TRACE *trace = (TRACE *)context;
   uint32_t pc;
   (void)value;
-  if (!trace->player || address < 0x73c8 || address >= 0xc000)
-    return;
+  if (!trace->player) return;
   pc = trace->player->vm->context.t_pc & 0xffff;
+  trace->executed[pc] = 1;
+  if (!(address >= pc && address <= ((pc + 4) & 0xffff)))
+    trace->data_reads[address & 0xffff] = 1;
+
+  if (trace->bank_reads && trace->kss && trace->kss->bank_num) {
+    uint32_t page = address >> 13;
+    uint32_t bank = trace->player->vm->mmap->current_bank[page];
+    uint32_t bank_size = trace->kss->bank_mode == KSS_8K ? 0x2000 : 0x4000;
+    if (trace->player->vm->mmap->current_slot[page] == VM_BANK_SLOT &&
+        bank >= trace->kss->bank_offset &&
+        bank < trace->kss->bank_offset + trace->kss->bank_num) {
+      uint32_t index = bank - trace->kss->bank_offset;
+      trace->bank_reads[index * bank_size + (address & (bank_size - 1))] = 1;
+    }
+  }
+
+  /* Record reads from the statically loaded image, excluding the current
+   * instruction and its longest possible immediate/prefix tail.  This is a
+   * deliberately conservative dynamic hint: builders still verify every
+   * resulting boundary against disassembly and all requested tracks. */
+  if (trace->kss && address >= trace->kss->load_adr &&
+      address < (uint32_t)trace->kss->load_adr + trace->kss->load_len &&
+      !(address >= pc && address <= ((pc + 4) & 0xffff)))
+    trace->loaded_reads[address] = 1;
+
+  if (address < 0x73c8 || address >= 0xc000) return;
   if ((0x6472 <= pc && pc < 0x73c8) || (0xc000 <= pc && pc < 0xc047))
     trace->music_reads[address] = 1;
+}
+
+static void print_bitmap_ranges(FILE *out, const char *label,
+                                const unsigned char *bitmap,
+                                uint32_t start, uint32_t end) {
+  uint32_t address = start;
+  int first = 1;
+  fprintf(out, "%s=", label);
+  while (address < end) {
+    uint32_t range_start;
+    while (address < end && !bitmap[address]) address++;
+    if (address == end) break;
+    range_start = address++;
+    while (address < end && bitmap[address]) address++;
+    fprintf(out, "%s%04X-%04X", first ? "" : ",", range_start, address);
+    first = 0;
+  }
+  if (first) fprintf(out, "none");
+  fputc('\n', out);
 }
 
 static void print_music_read_ranges(FILE *out, const TRACE *trace) {
@@ -236,26 +301,56 @@ static int analyze_one(const char *directory, const char *stem,
 
   for (i = 0; i < track_count; i++) {
     KSSPLAY *player = KSSPLAY_new(44100, 1, 16);
+    KSS *track_kss = KSS_load_file((char *)kss_path);
     TRACE trace;
     int samples;
     int j;
-    if (!player) {
+    unsigned int reset_pc, reset_sp;
+    if (!player || !track_kss) {
+      if (player) KSSPLAY_delete(player);
+      if (track_kss) KSS_delete(track_kss);
       fclose(out); KSS_delete(kss); return 1;
     }
     memset(&trace, 0, sizeof(trace));
-    trace.kss = kss;
+    trace.kss = track_kss;
     trace.player = player;
-    KSSPLAY_set_data(player, kss);
+    trace.bank_read_size = (track_kss->bank_mode == KSS_8K ? 0x2000 : 0x4000);
+    if (track_kss->bank_num)
+      trace.bank_reads = calloc(track_kss->bank_num, trace.bank_read_size);
+    if (track_kss->bank_num && !trace.bank_reads) {
+      KSSPLAY_delete(player); KSS_delete(track_kss);
+      fclose(out); KSS_delete(kss); return 1;
+    }
+    KSSPLAY_set_data(player, track_kss);
     KSSPLAY_set_memwrite_handler(player, &trace, memory_write);
     KSSPLAY_set_memread_handler(player, &trace, memory_read);
     KSSPLAY_set_iowrite_handler(player, &trace, io_write);
     KSSPLAY_reset(player, (uint32_t)tracks[i].id, 0);
+    reset_pc = player->vm->context.pc & 0xffff;
+    reset_sp = player->vm->context.sp & 0xffff;
     seed_current_banks(&trace, player);
+    if (analysis_seconds_cap > 0 && tracks[i].seconds > analysis_seconds_cap)
+      tracks[i].seconds = analysis_seconds_cap;
     samples = tracks[i].seconds * 44100;
     KSSPLAY_calc_silent(player, (uint32_t)samples);
     fprintf(out, "track=%d\ntitle=%s\nseconds_analyzed=%d\nfade_seconds=%d\nloop=%s\n",
             tracks[i].id, tracks[i].title, tracks[i].seconds,
             tracks[i].fade_seconds, tracks[i].loop ? "yes" : "no");
+    fprintf(out, "page1_physical_bank=%u\n",
+            player->vm->mmap->current_bank[2]);
+    fprintf(out, "reset_pc=%04X\nreset_sp=%04X\nfinal_pc=%04X\nfinal_sp=%04X\n",
+            reset_pc, reset_sp, player->vm->context.pc & 0xffff,
+            player->vm->context.sp & 0xffff);
+    if (probe_address >= 0) {
+      fprintf(out, "memory_probe=%04X:", probe_address);
+      for (j = 0; j < probe_length; j++)
+        fprintf(out, "%02X", MMAP_read_memory(
+            player->vm->mmap, (probe_address + j) & 0xffff));
+      fputc('\n', out);
+    }
+    fprintf(out, "complete_page_map=%u,%u\n",
+            player->quarth_song_page[tracks[i].id & 0xff],
+            player->quarth_song_id[tracks[i].id & 0xff]);
     if (kss->bank_mode == KSS_8K) {
       int page4[MAX_COMBINATIONS];
       int page5[MAX_COMBINATIONS];
@@ -281,6 +376,11 @@ static int analyze_one(const char *directory, const char *stem,
     } else {
       print_list(out, "bank16_selectors", trace.bank16,
                  trace.bank16_count, kss->bank_offset);
+      fprintf(out, "bank16_selector_pcs=");
+      for (j = 0; j < trace.bank16_count; j++)
+        fprintf(out, "%s%04X", j ? "," : "", trace.bank16_pc[j] & 0xffff);
+      if (!trace.bank16_count) fprintf(out, "none");
+      fputc('\n', out);
       fprintf(out, "bank16_mapped_page4_page5=");
       for (j = 0; j < trace.bank16_count; j++) {
         if (j) fputc(',', out);
@@ -290,11 +390,34 @@ static int analyze_one(const char *directory, const char *stem,
       if (!trace.bank16_count) fprintf(out, "none");
       fputc('\n', out);
     }
+    print_bitmap_ranges(out, "executed_ranges", trace.executed,
+                        track_kss->load_adr,
+                        (uint32_t)track_kss->load_adr + track_kss->load_len);
+    print_bitmap_ranges(out, "executed_all_ranges", trace.executed,
+                        0, 0x10000);
+    print_bitmap_ranges(out, "data_read_ranges", trace.data_reads,
+                        0, 0x10000);
+    print_bitmap_ranges(out, "memory_write_ranges", trace.memory_writes,
+                        0, 0x10000);
+    print_bitmap_ranges(out, "loaded_data_read_ranges", trace.loaded_reads,
+                        track_kss->load_adr,
+                        (uint32_t)track_kss->load_adr + track_kss->load_len);
+    for (j = 0; j < track_kss->bank_num; j++) {
+      char label[64];
+      snprintf(label, sizeof(label), "bank_data_read_ranges_%d", j);
+      print_bitmap_ranges(out, label,
+                          trace.bank_reads + j * trace.bank_read_size,
+                          0, trace.bank_read_size);
+    }
     print_music_read_ranges(out, &trace);
     fprintf(out, "scc_writes=%lu\npsg_writes=%lu\n",
             trace.scc_writes, trace.psg_writes);
+    print_bitmap_ranges(out, "scc_write_pc_ranges", trace.scc_write_pcs,
+                        0, 0x10000);
     fputc('\n', out);
     KSSPLAY_delete(player);
+    free(trace.bank_reads);
+    KSS_delete(track_kss);
   }
   fclose(out);
   KSS_delete(kss);
@@ -359,6 +482,24 @@ static int analyze_directory(const char *directory) {
 
 int main(int argc, char **argv) {
   const char *directory = argc > 1 ? argv[1] : "vigamup";
+  const char *cap = getenv("KSS_ANALYSIS_SECONDS");
+  const char *probe = getenv("KSS_ANALYSIS_PROBE");
+  if (cap && *cap) {
+    analysis_seconds_cap = atoi(cap);
+    if (analysis_seconds_cap < 1) {
+      fprintf(stderr, "KSS_ANALYSIS_SECONDS must be a positive integer\n");
+      return 2;
+    }
+  }
+  if (probe && *probe &&
+      sscanf(probe, "%x:%d", &probe_address, &probe_length) != 2) {
+    fprintf(stderr, "KSS_ANALYSIS_PROBE must be HEX_ADDRESS:LENGTH\n");
+    return 2;
+  }
+  if (probe_length < 0 || probe_length > 256) {
+    fprintf(stderr, "KSS_ANALYSIS_PROBE length must be 0..256\n");
+    return 2;
+  }
   if (argc > 3) {
     fprintf(stderr, "usage: %s [DIRECTORY] [GAME]\n", argv[0]);
     return 2;

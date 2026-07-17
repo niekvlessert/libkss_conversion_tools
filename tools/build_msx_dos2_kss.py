@@ -94,12 +94,56 @@ def target_player_source(source: str) -> str:
         flags=re.DOTALL,
     )
     source = re.sub(
+        r"; KCP_PARSE_BEGIN\n.*?; KCP_PARSE_END\n",
+        "kcpx_parse_sources:\n"
+        "kcpz_parse_sources:\n"
+        "        jp      qcpx_parse_bad\n",
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
         r"; SCPX_MATERIALIZER_BEGIN\n.*?; SCPX_MATERIALIZER_END\n",
         "scpx_materialize_selected:\n"
         "scpx_apply_patches:\n"
         "        jp      format_error\n",
         source,
         flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"; KCP_MATERIALIZER_BEGIN\n.*?; KCP_MATERIALIZER_END\n",
+        "kcpx_materialize_selected:\n"
+        "kcpz_materialize_selected:\n"
+        "        jp      format_error\n",
+        source,
+        flags=re.DOTALL,
+    )
+    # Generic complete-page files are handled by the fixed page-3 bootstrap,
+    # never by this legacy page-1 runtime copy. Remove their unreachable
+    # probe/parser/dispatch bytes to keep the established resident tail bound.
+    source = source.replace(
+        "        cp      5\n"
+        "        jp      nc,kcpx_parse_sources\n",
+        "",
+    )
+    source = source.replace(
+        "        cp      5\n"
+        "        jp      z,kcpx_materialize_selected\n"
+        "        cp      6\n"
+        "        jp      z,kcpz_materialize_selected\n",
+        "",
+    )
+    source = source.replace(
+        "        cp      'S'\n"
+        "        jr      z,probe_qcpx_prefix_s\n"
+        "        cp      'K'\n"
+        "        jr      nz,probe_qcpx_restore\n"
+        "        ld      b,5\n"
+        "        jr      probe_qcpx_prefix_ok\n"
+        "probe_qcpx_prefix_s:\n"
+        "        ld      b,3\n",
+        "        cp      'S'\n"
+        "        jr      nz,probe_qcpx_restore\n"
+        "        ld      b,3\n",
     )
     return source
 
@@ -208,11 +252,26 @@ def main() -> int:
     loader_copy.write_bytes(loader_source.read_bytes())
     layout = ROOT / "msx" / "PLAYER_LAYOUT.inc"
     (temp / "PLAYER_LAYOUT.inc").write_text(layout.read_text())
-    subprocess.run(
-        [args.assembler, "-o", str(player_raw), player_copy.name],
+    bootstrap_result = subprocess.run(
+        [args.assembler, "-L", "-o", str(player_raw), player_copy.name],
         cwd=temp,
         check=True,
+        capture_output=True,
+        text=True,
     )
+    bootstrap_labels = parse_labels(bootstrap_result.stdout + bootstrap_result.stderr)
+    scratch_start = bootstrap_labels["QCPX_SCRATCH"]
+    scratch_end = scratch_start + bootstrap_labels["QCPX_SCRATCH_SIZE"]
+    if bootstrap_labels["player_end"] > scratch_start:
+        raise ValueError(
+            f"bootstrap ends at {bootstrap_labels['player_end']:04X}, "
+            f"overlapping scratch at {scratch_start:04X}"
+        )
+    if scratch_end > bootstrap_labels["PUT_P0_DISPATCH"]:
+        raise ValueError(
+            f"scratch ends at {scratch_end:04X}, overlapping fixed dispatches "
+            f"at {bootstrap_labels['PUT_P0_DISPATCH']:04X}"
+        )
     if len(player_raw.read_bytes()) > 0x4000:
         raise ValueError("bootstrap player is unexpectedly large")
     (temp / "PLAYER_LAYOUT.inc").write_text(target_layout(layout.read_text()))

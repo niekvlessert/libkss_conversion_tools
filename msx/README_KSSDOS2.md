@@ -173,3 +173,16 @@ current KSSPLAY.COM uses fixed page-3 TPA residency. For complete-page files,
 Escape/Ctrl-C silences the chips, restores mapper RAM and the original page-1
 and page-2 segments, restores any owned vectors, and terminates through DOS2.
 DOS2 then reclaims the mapper segments allocated by the process.
+
+### Generic KCPX/KCPZ status
+
+The desktop libkss changes in this repository recognize generic KCPX/KCPZ and
+materialize the selected 16K template plus sparse song overlay before INIT.
+The native `KSSPLAY.COM` currently recognizes the specialized QCPX/QCPZ and
+SCPX/SCPZ variants only. Generic files such as
+`nemesis2_complete_page_compressed.kss` therefore require a native parser for
+the KCP fixed header, logical-to-original song map, common template, and sparse
+overlay records before they can be called MSX-compatible. The raw KCPX overlay
+can be applied in place to the allocated page-1 segment. KCPZ additionally
+requires streaming ZX0 expansion or temporary staging; its complete sparse
+overlay is not guaranteed to fit the existing 1 KiB page-3 scratch area.

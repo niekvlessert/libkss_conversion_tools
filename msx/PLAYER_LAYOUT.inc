@@ -47,7 +47,10 @@ FIELD_SCRATCH:  equ     0xC800
 ; Complete-page materialization runs from the enlarged C000H bootstrap,
 ; which now ends just below D400H. Keep its transfer buffer at D400H-D7FFH
 ; and all copied page-3 runtime helpers above that buffer.
-QCPX_SCRATCH:   equ     0xD400
+; Fixed page-3 TPA scratch area. Keep this after the complete bootstrap code
+; and well below the runtime marker/stack reservation.
+QCPX_SCRATCH:      equ  0xD600
+QCPX_SCRATCH_SIZE: equ  0x0200
 
 STACK_TOP:      equ     0xDA00
 RETURN_STUB:    equ     0xD920

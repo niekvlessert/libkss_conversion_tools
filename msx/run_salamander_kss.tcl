@@ -8,7 +8,7 @@ set master_volume 100
 set PSG_volume 100
 set SCC_volume 100
 
-after realtime 20 {type "KSSPLAY.COM SCPZ.KSS 5"}
+after realtime 20 {type "KSSPLAY.COM SALAMAND.KSS 5"}
 after realtime 23 {type "\r"}
 after realtime 28 {
     set screen [open [file join $test_dir salamander-track5-screen.bin] wb]

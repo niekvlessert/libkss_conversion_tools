@@ -619,9 +619,15 @@ probe_qcpx_header:
         ret     nz
         ld      a,(header+0x21)
         cp      'Q'
-        jr      z,probe_qcpx_header_prefix_ok
+        jr      z,probe_qcpx_header_specialized
         cp      'S'
+        jr      z,probe_qcpx_header_specialized
+        cp      'K'
         ret     nz
+        ld      b,1                 ; generic KCP needs a temp segment for Z
+        jr      probe_qcpx_header_prefix_ok
+probe_qcpx_header_specialized:
+        ld      b,0
 probe_qcpx_header_prefix_ok:
         ld      a,(header+0x22)
         cp      'C'
@@ -631,15 +637,21 @@ probe_qcpx_header_prefix_ok:
         ret     nz
         ld      a,(header+0x24)
         cp      'X'
-        jr      z,probe_qcpx_header_found
+        jr      z,probe_qcpx_header_raw
         cp      'Z'
         ret     nz
+        ld      a,b
+        or      a
+        ld      c,1
+        jr      z,probe_qcpx_header_found
+        inc     c                   ; generic KCPZ: destination + overlay temp
+        jr      probe_qcpx_header_found
+probe_qcpx_header_raw:
+        ld      c,1
 probe_qcpx_header_found:
         ld      a,1
         ld      (qcpx_file),a
-        ; The five logical pages are records in one container.  Native MSX
-        ; playback materializes only the selected record, so one physical
-        ; mapper segment is sufficient.
+        ld      a,c
         ld      (declared_banks),a
         ret
 

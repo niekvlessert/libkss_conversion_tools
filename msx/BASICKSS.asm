@@ -1369,6 +1369,7 @@ qcp_current_song:   defb 0
 qcp_key_latch:      defb 0
 qcp_dest_segment:   defb 0
 qcp_selected_segment:defb 0
+qcp_temp_segment:   defb 0
 qcp_value:      defb    0
 qcp_scc_primary_bits:defb 0
 qcp_engine_size:    defw 0
@@ -1531,55 +1532,19 @@ qcpx_runtime_path:
         ; restore its normal mapper and slot layout while servicing HALT, so
         ; every PLAY must first reassert page 1 and the page-2 SCC slot.
         ;
-        ;   LD A,page1_segment / CALL PUT_P1
-        ;   LD A,scc_slot / LD H,80H / CALL CUSTOM_ENASLT
-        ;   LD HL,play / LD DE,return / PUSH DE / JP (HL) / RET
-        ld      hl,PLAY_WRAPPER
-        ld      (hl),0x3E
-        inc     hl
+        ; Mapper and slot helpers may alter registers that the KSS engine
+        ; retains between ticks. Copy a wrapper that preserves the complete
+        ; main/index register set around those helpers.
+        ld      hl,qcpx_play_wrapper
+        ld      de,PLAY_WRAPPER
+        ld      bc,qcpx_play_wrapper_end-qcpx_play_wrapper
+        ldir
         ld      a,(qcp_selected_segment)
-        ld      (hl),a
-        inc     hl
-        ld      (hl),0xCD
-        inc     hl
-        ld      (hl),0x10
-        inc     hl
-        ld      (hl),0xD0
-        inc     hl
-        ld      (hl),0x3E
-        inc     hl
+        ld      (PLAY_WRAPPER+(qcpx_page1_segment_immediate-qcpx_play_wrapper)+1),a
         ld      a,(RUNTIME_SCC_SLOT)
-        ld      (hl),a
-        inc     hl
-        ld      (hl),0x26
-        inc     hl
-        ld      (hl),0x80
-        inc     hl
-        ld      (hl),0xCD
-        inc     hl
-        ld      (hl),CUSTOM_ENASLT & 0xFF
-        inc     hl
-        ld      (hl),CUSTOM_ENASLT >> 8
-        inc     hl
-        ld      (hl),0x21
-        inc     hl
-        ld      de,(play_address)
-        ld      (hl),e
-        inc     hl
-        ld      (hl),d
-        inc     hl
-        ld      (hl),0x11
-        inc     hl
-        ld      de,PLAY_WRAPPER+20
-        ld      (hl),e
-        inc     hl
-        ld      (hl),d
-        inc     hl
-        ld      (hl),0xD5
-        inc     hl
-        ld      (hl),0xE9
-        inc     hl
-        ld      (hl),0xC9
+        ld      (PLAY_WRAPPER+(qcpx_scc_slot_immediate-qcpx_play_wrapper)+1),a
+        ld      hl,(play_address)
+        ld      (PLAY_WRAPPER+(qcpx_play_target_immediate-qcpx_play_wrapper)+1),hl
 
         ; The OpenMSX/extb SCC is a non-expanded primary slot. Selecting it
         ; needs only the page-2 bits of port A8; BIOS ENASLT is unnecessary
@@ -1662,6 +1627,35 @@ qcpx_return_halt:
         ei
         jr      qcpx_return_halt
 qcpx_return_stub_end:
+
+qcpx_play_wrapper:
+        push    af
+        push    bc
+        push    de
+        push    hl
+        push    ix
+        push    iy
+qcpx_page1_segment_immediate:
+        ld      a,0
+        call    PUT_P1_DISPATCH
+qcpx_scc_slot_immediate:
+        ld      a,0
+        ld      h,0x80
+        call    CUSTOM_ENASLT
+        pop     iy
+        pop     ix
+        pop     hl
+        pop     de
+        pop     bc
+        pop     af
+qcpx_play_target_immediate:
+        ld      hl,0
+        ld      de,PLAY_WRAPPER+(qcpx_play_return-qcpx_play_wrapper)
+        push    de
+        jp      (hl)
+qcpx_play_return:
+        ret
+qcpx_play_wrapper_end:
 
 qcpx_poll_keyboard:
         ; Poll the keyboard directly through the PPI. BIOS keyboard calls can
@@ -1833,6 +1827,8 @@ qcpx_parse:
         call    qcpx_read_word
 
         ld      a,(qcp_format)
+        cp      5
+        jp      nc,kcpx_parse_sources
         cp      3
         jr      nc,scpx_parse_sources
 
@@ -1903,17 +1899,17 @@ scpx_parse_sources:
         ld      de,0x4000
         or      a
         sbc     hl,de
-        jr      nz,qcpx_parse_bad
+        jp      nz,qcpx_parse_bad
         ld      hl,(qcp_common_size)
         ld      de,0x4000
         or      a
         sbc     hl,de
-        jr      nz,qcpx_parse_bad
+        jp      nz,qcpx_parse_bad
         ld      hl,(qcp_page_data_address)
         ld      de,0x7E00
         or      a
         sbc     hl,de
-        jr      nz,qcpx_parse_bad
+        jp      nz,qcpx_parse_bad
         ld      hl,0x4000
         ld      (qcp_page_data_address),hl
         ld      a,(qcp_format)
@@ -1940,6 +1936,46 @@ scpz_parse_sources:
         or      a
         ret
 ; SCP_PARSE_END
+
+; KCP_PARSE_BEGIN
+kcpx_parse_sources:
+        ; Generic KCP stores a complete 16K page at 4000H. The third word is
+        ; the relocated workspace address and is intentionally pack-specific.
+        ld      hl,(qcp_engine_size)
+        ld      de,0x4000
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      hl,(qcp_common_size)
+        ld      de,0x4000
+        or      a
+        sbc     hl,de
+        jr      nz,qcpx_parse_bad
+        ld      a,(qcp_format)
+        cp      6
+        jr      z,kcpz_parse_sources
+        ld      hl,0x231
+        ld      (qcp_engine_source),hl
+        ld      hl,0x4231
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+
+kcpz_parse_sources:
+        ; Template descriptor: compressed size and offset relative to KCPZ.
+        ld      hl,0x231
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_engine_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_engine_source),hl
+        ld      hl,0x235
+        ld      (qcp_records_source),hl
+        or      a
+        ret
+; KCP_PARSE_END
 qcpx_parse_bad:
         scf
         ret
@@ -2035,6 +2071,10 @@ qcpx_materialize_selected:
         jp      z,scpx_materialize_selected
         cp      4
         jp      z,scpz_materialize_selected
+        cp      5
+        jp      z,kcpx_materialize_selected
+        cp      6
+        jp      z,kcpz_materialize_selected
         ; Only one physical page is required on MSX.  The selected logical
         ; record is expanded into the first allocated KSS segment; selecting
         ; another song later simply rebuilds this same segment.
@@ -2422,7 +2462,6 @@ scpx_materialize_selected:
         ld      (qcp_dest_offset+1),a
         ld      bc,0x4000
         call    qcpx_copy_range
-
         ld      hl,(qcp_records_source)
         ld      (qcp_cursor),hl
 scpx_record_scan:
@@ -2509,6 +2548,302 @@ scpx_patch_done:
         ret
 ; SCPX_MATERIALIZER_END
 
+; KCP_MATERIALIZER_BEGIN
+; Generic uncompressed complete page: copy the common 16K template, locate
+; the selected variable-length overlay, then apply its offset/length records.
+kcpx_materialize_selected:
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        ld      (qcp_dest_segment),a
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        xor     a
+        ld      (qcp_dest_offset),a
+        ld      (qcp_dest_offset+1),a
+        ld      bc,0x4000
+        call    qcpx_copy_range
+
+        ld      hl,(qcp_records_source)
+        ld      (qcp_cursor),hl
+        ld      a,(qcp_selected_page)
+        ld      (qcp_page_index),a
+kcpx_overlay_scan:
+        ld      hl,(qcp_cursor)
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_data_size),hl
+        ld      a,(qcp_page_index)
+        or      a
+        jr      z,kcpx_overlay_found
+        ld      hl,(qcp_cursor)
+        ld      de,2
+        add     hl,de
+        ld      de,(qcp_data_size)
+        add     hl,de
+        ld      (qcp_cursor),hl
+        ld      a,(qcp_page_index)
+        dec     a
+        ld      (qcp_page_index),a
+        jr      kcpx_overlay_scan
+
+kcpx_overlay_found:
+        ; Stream the sparse overlay through the fixed page-3 scratch buffer.
+        ; qcp_patch_offset/value are reused as buffer cursor/bytes available.
+        ld      hl,(qcp_data_size)
+        ld      (qcp_patch_left),hl
+        xor     a
+        ld      (qcp_patch_value),a
+        ld      (qcp_patch_value+1),a
+        ld      a,(qcp_selected_segment)
+        call    PUT_P1_DISPATCH
+kcpx_overlay_loop:
+        ld      hl,(qcp_patch_left)
+        ld      a,h
+        or      l
+        jr      z,kcpx_overlay_done
+        call    kcpx_buffer_read_word
+        ret     c
+        ld      (qcp_dest_offset),hl
+        call    kcpx_buffer_read_word
+        ret     c
+        ld      (qcp_chunk_size),hl
+        call    kcpx_buffer_copy_record
+        ret     c
+        jr      kcpx_overlay_loop
+kcpx_overlay_done:
+        ld      a,(qcp_selected_page)
+        ld      (qcp_materialized_page),a
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
+        ret
+
+; Refill at most 1KB from staged storage. Page 1 is restored directly to the
+; final engine segment, never to a second temporary mapper segment.
+kcpx_buffer_fill:
+        ld      hl,(qcp_patch_left)
+        ld      a,h
+        or      l
+        jr      z,kcpx_buffer_error
+        ld      b,h
+        ld      c,l
+        call    source_boundary
+        call    cap_bc_hl
+        ld      hl,QCPX_SCRATCH_SIZE
+        call    cap_bc_hl
+        ld      (chunk_size),bc
+        call    map_source_page1
+        ld      hl,(source_position)
+        ld      a,h
+        and     0x3F
+        or      0x40
+        ld      h,a
+        ld      de,QCPX_SCRATCH
+        ld      bc,(chunk_size)
+        ldir
+        ld      a,(qcp_selected_segment)
+        call    PUT_P1_DISPATCH
+        call    advance_source
+        ld      hl,QCPX_SCRATCH
+        ld      (qcp_patch_offset),hl
+        ld      hl,(chunk_size)
+        ld      (qcp_patch_value),hl
+        or      a
+        ret
+kcpx_buffer_error:
+        scf
+        ret
+
+kcpx_buffer_read_byte:
+        ld      hl,(qcp_patch_value)
+        ld      a,h
+        or      l
+        call    z,kcpx_buffer_fill
+        ret     c
+        ld      hl,(qcp_patch_offset)
+        ld      a,(hl)
+        ld      (qcp_value),a
+        inc     hl
+        ld      (qcp_patch_offset),hl
+        ld      hl,(qcp_patch_value)
+        dec     hl
+        ld      (qcp_patch_value),hl
+        ld      hl,(qcp_patch_left)
+        dec     hl
+        ld      (qcp_patch_left),hl
+        ld      a,(qcp_value)
+        or      a
+        ret
+
+kcpx_buffer_read_word:
+        call    kcpx_buffer_read_byte
+        ret     c
+        push    af
+        call    kcpx_buffer_read_byte
+        jr      c,kcpx_buffer_word_error
+        ld      h,a
+        pop     af
+        ld      l,a
+        or      a
+        ret
+kcpx_buffer_word_error:
+        pop     af
+        scf
+        ret
+
+; Copy one record's data from the page-3 buffer into the final page-1 image.
+; Records may span any number of scratch-buffer or staged-page boundaries.
+kcpx_buffer_copy_record:
+        ld      hl,(qcp_chunk_size)
+        ld      a,h
+        or      l
+        ret     z
+        ld      hl,(qcp_patch_value)
+        ld      a,h
+        or      l
+        call    z,kcpx_buffer_fill
+        ret     c
+        ld      bc,(qcp_chunk_size)
+        ld      hl,(qcp_patch_value)
+        call    cap_bc_hl
+        ld      (qcp_remaining),bc
+        ld      hl,(qcp_patch_offset)
+        ld      de,(qcp_dest_offset)
+        push    hl
+        ld      hl,0x4000
+        add     hl,de
+        ex      de,hl
+        pop     hl
+        ld      bc,(qcp_remaining)
+        ldir
+        ld      (qcp_patch_offset),hl
+        ld      hl,(qcp_patch_value)
+        ld      de,(qcp_remaining)
+        or      a
+        sbc     hl,de
+        ld      (qcp_patch_value),hl
+        ld      hl,(qcp_patch_left)
+        or      a
+        sbc     hl,de
+        ld      (qcp_patch_left),hl
+        ld      hl,(qcp_chunk_size)
+        or      a
+        sbc     hl,de
+        ld      (qcp_chunk_size),hl
+        ld      hl,(qcp_dest_offset)
+        add     hl,de
+        ld      (qcp_dest_offset),hl
+        jr      kcpx_buffer_copy_record
+
+; Generic compressed complete page. Decode the template into the persistent
+; page-1 segment and the sparse overlay into a temporary allocated segment.
+; The latter is then exposed through page 2 while its records patch page 1.
+kcpz_materialize_selected:
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      (qcp_selected_segment),a
+        ld      (qcp_dest_segment),a
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        ld      (qcp_temp_segment),a
+        call    kcpz_read_selected_descriptor
+
+        ld      a,(qcp_dest_segment)
+        call    PUT_P1_DISPATCH
+        xor     a
+        ld      (0x4000),a
+        ld      hl,0x4000
+        ld      de,0x4001
+        ld      bc,0x3FFF
+        ldir
+        ld      hl,(qcp_engine_source)
+        call    qcpx_set_source
+        ld      de,0x4000
+        call    qcpz_decompress_source
+
+        ld      a,(qcp_temp_segment)
+        ld      (qcp_dest_segment),a
+        call    PUT_P1_DISPATCH
+        ld      hl,(qcp_data_source)
+        call    qcpx_set_source
+        ld      de,0x4000
+        call    qcpz_decompress_source
+
+        ld      a,(qcp_selected_segment)
+        ld      (qcp_dest_segment),a
+        call    PUT_P1_DISPATCH
+        call    qcpz_select_ram_page2
+        ld      a,(qcp_temp_segment)
+        call    PUT_P2_DISPATCH
+        ld      hl,0x8000
+        ld      de,(qcp_data_size)
+        ld      (qcp_remaining),de
+kcpz_overlay_loop:
+        ld      de,(qcp_remaining)
+        ld      a,d
+        or      e
+        jr      z,kcpz_overlay_done
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      (qcp_dest_offset),de
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      (qcp_chunk_size),de
+        push    hl
+        ld      hl,(qcp_dest_offset)
+        ld      de,0x4000
+        add     hl,de
+        ex      de,hl
+        pop     hl
+        ld      bc,(qcp_chunk_size)
+        ldir
+        ; LDIR leaves HL at the next overlay record. Preserve that source
+        ; pointer while updating the remaining encoded byte count; otherwise
+        ; the next iteration reads its record header from the count itself.
+        push    hl
+        ld      hl,(qcp_remaining)
+        ld      de,(qcp_chunk_size)
+        or      a
+        sbc     hl,de
+        ld      de,4
+        or      a
+        sbc     hl,de
+        ld      (qcp_remaining),hl
+        pop     hl
+        jr      kcpz_overlay_loop
+kcpz_overlay_done:
+        ld      a,(qcp_selected_page)
+        ld      (qcp_materialized_page),a
+        ld      a,(RUNTIME_BASIC_P1)
+        call    PUT_P1_DISPATCH
+        or      a
+        ret
+
+kcpz_read_selected_descriptor:
+        ld      a,(qcp_selected_page)
+        ld      e,a
+        ld      d,0
+        ld      l,e
+        ld      h,d
+        add     hl,hl
+        add     hl,de
+        add     hl,hl
+        ld      de,(qcp_records_source)
+        add     hl,de
+        call    qcpx_set_source
+        call    qcpx_read_word
+        ld      (qcp_data_size),hl
+        call    qcpx_read_word
+        ld      (qcp_data_compressed_size),hl
+        call    qcpx_read_word
+        ld      de,0x21
+        add     hl,de
+        ld      (qcp_data_source),hl
+        ret
+; KCP_MATERIALIZER_END
+
 qcpx_apply_patches:
         ld      hl,(qcp_patch_count)
         ld      (qcp_patch_left),hl
@@ -2566,7 +2901,7 @@ qcpx_copy_loop:
         call    cap_bc_hl
         ld      (qcp_chunk_size),bc
         ; Never use more than the fixed page-3 scratch buffer.
-        ld      hl,0x0400
+        ld      hl,QCPX_SCRATCH_SIZE
         ld      bc,(qcp_chunk_size)
         call    cap_bc_hl
         ld      (qcp_chunk_size),bc
@@ -2684,7 +3019,12 @@ probe_qcpx:
         cp      'Q'
         jr      z,probe_qcpx_prefix_q
         cp      'S'
+        jr      z,probe_qcpx_prefix_s
+        cp      'K'
         jr      nz,probe_qcpx_restore
+        ld      b,5
+        jr      probe_qcpx_prefix_ok
+probe_qcpx_prefix_s:
         ld      b,3
         jr      probe_qcpx_prefix_ok
 probe_qcpx_prefix_q:
