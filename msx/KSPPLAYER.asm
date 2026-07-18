@@ -1391,7 +1391,9 @@ kcpx_runtime_path:
         ld      (kcp_materialized_page),a
         ld      a,(song_number)
         ld      (kcp_current_song),a
-        ld      a,(RUNTIME_SPARSE_MODE)
+        ; A relaunched player may see the cursor key that requested the
+        ; switch still held. Start latched and clear it on the first key-up.
+        ld      a,1
         ld      (kcp_key_latch),a
         call    kcpx_get_song_mapping
         jp      c,format_error
@@ -1641,11 +1643,11 @@ kcpx_previous_decrement:
 
 kcpx_switch_song:
         di
-        ld      b,a
-        ld      a,(RUNTIME_SPARSE_MODE)
-        or      a
-        ld      a,b
-        jp      nz,kcpx_reload_sparse_song
+        ; Route every Konami switch through the fixed page-0 loader. It can
+        ; print the cached title safely under DOS2; sparse packs additionally
+        ; refill only missing compressed source segments.
+        jp      kcpx_reload_sparse_song
+kcpx_switch_song_resident_legacy:
         ld      (kcp_current_song),a
         ld      (song_number),a
         call    kcpx_silence

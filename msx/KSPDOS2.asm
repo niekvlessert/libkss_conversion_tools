@@ -29,6 +29,7 @@ KSS_SONG:       equ     0x7FF7
 ; The raw file staging area therefore starts at 12.
 STAGE_BANK:     equ     12
 HEADER_BUFFER:  equ     0x8000
+INFO_CACHE_SIZE: equ    0x0C00
 
 PLAYER_RUNTIME_CONFIG: equ 0xC960
 PLAYER_RUNTIME_STAGE:  equ PLAYER_RUNTIME_CONFIG
@@ -212,9 +213,9 @@ print_alloc_stage_ready:
         call    stage_file
         jp      nz,stage_read_error
 
-        ; Titles already live in the containers: INFO records in KCP files
-        ; and title= in the compact KSP META chunk.
-        call    print_selected_title
+        ; Keep Konami INFO metadata in page 0 so every later track change can
+        ; print its title without touching the floppy.
+        call    cache_kcp_info
 
         ld      a,(sparse_mode)
         or      a
@@ -235,6 +236,7 @@ patch_file_done:
         ; its normal BASIC-compatible state and let it take over C000H.
         ld      de,msg_08
         call    print_text
+        call    print_selected_title
 launch_player:
         ; DOS2 console output is allowed to use the top of the TPA.  In
         ; particular, it can overwrite 7FF0H..7FF7H, so write the player
@@ -297,19 +299,22 @@ launch_player:
         ld      (PLAYER_RUNTIME_RELOAD_ENTRY),hl
         jp      0xC000
 
-; The resident page-3 player returns here for a sparse-file track change.
+; The resident page-3 player returns here for every Konami track change.
 ; Page 0 still contains this loader, DOS mapper/slot state has been restored,
-; and A is the new public song number. Refill only the selected source pages.
+; and A is the new public song number. Sparse files refill only cache misses;
+; full-stage files retain all their source pages.
 sparse_reload_entry:
         di
         ld      (song_number),a
         ld      hl,(0x0006)
         ld      sp,hl
+        ld      a,(sparse_mode)
+        or      a
+        jr      z,sparse_reload_staged
         call    stage_file
         jp      nz,stage_read_error
-        ; Do not rescan the on-disk INFO block here: a cache-hit track change
-        ; must remain free of floppy I/O. The initial launch already printed
-        ; the selected title.
+sparse_reload_staged:
+        call    print_cached_kcp_title
         jp      launch_player
 
 ; Parse the first command-line token into filename and an optional decimal
@@ -1142,13 +1147,171 @@ print_dot:
 ; -------------------------------------------------------------------------
 ; Track-title output while the source file is still open.
 
+; Cache the final 3K of a Konami KSP and locate its trailing INFO block. All
+; current packs have INFO blocks below 2.8K. Validate that INFO's declared
+; payload ends exactly at EOF so an incidental "INFO" in compressed data or
+; a title cannot be mistaken for the directory header.
+cache_kcp_info:
+        xor     a
+        ld      (info_cache_valid),a
+        ld      a,(input_format)
+        cp      1
+        ret     nz
+        ld      hl,(file_size)
+        ld      a,(file_size+2)
+        ld      de,INFO_CACHE_SIZE
+        or      a
+        sbc     hl,de
+        sbc     a,0
+        ret     c
+        ld      e,a
+        ld      d,0
+        ld      a,(file_handle)
+        ld      b,a
+        xor     a
+        ld      c,SEEK
+        call    BDOS
+        ret     nz
+        ld      a,(file_handle)
+        ld      b,a
+        ld      de,title_info_cache
+        ld      hl,INFO_CACHE_SIZE
+        ld      c,READ
+        call    BDOS
+        ret     nz
+
+        ld      hl,title_info_cache+INFO_CACHE_SIZE-4
+        ld      bc,INFO_CACHE_SIZE-3
+cache_kcp_info_scan:
+        push    hl
+        ld      a,(hl)
+        cp      'I'
+        jr      nz,cache_kcp_info_magic_bad
+        inc     hl
+        ld      a,(hl)
+        cp      'N'
+        jr      nz,cache_kcp_info_magic_bad
+        inc     hl
+        ld      a,(hl)
+        cp      'F'
+        jr      nz,cache_kcp_info_magic_bad
+        inc     hl
+        ld      a,(hl)
+        cp      'O'
+        jr      nz,cache_kcp_info_magic_bad
+        pop     hl
+        push    bc
+        ld      (info_cache_pointer),hl
+        push    hl
+        ld      de,4
+        add     hl,de
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      a,(hl)
+        inc     hl
+        or      (hl)
+        pop     hl
+        jr      nz,cache_kcp_info_candidate_bad
+        push    hl
+        ld      bc,16
+        add     hl,bc
+        add     hl,de
+        ld      bc,title_info_cache+INFO_CACHE_SIZE
+        or      a
+        sbc     hl,bc
+        pop     hl
+        jr      nz,cache_kcp_info_candidate_bad
+        push    hl
+        ld      de,8
+        add     hl,de
+        ld      a,(hl)
+        inc     hl
+        ld      d,(hl)
+        pop     hl
+        or      a
+        jr      z,cache_kcp_info_candidate_bad
+        ld      a,d
+        or      a
+        jr      nz,cache_kcp_info_candidate_bad
+        pop     bc
+        ld      a,1
+        ld      (info_cache_valid),a
+        ret
+cache_kcp_info_candidate_bad:
+        pop     bc
+        jr      cache_kcp_info_scan_next
+cache_kcp_info_magic_bad:
+        pop     hl
+cache_kcp_info_scan_next:
+        dec     hl
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,cache_kcp_info_scan
+        ret
+
 print_selected_title:
         ld      a,(input_format)
         cp      1
-        jr      z,print_kcp_title
+        jr      z,print_cached_kcp_title
         cp      2
-        jr      z,print_ksp_title
+        jp      z,print_ksp_title
         ret
+
+; Find the selected public song in the cached INFO records. Each record has
+; ten fixed bytes followed by a zero-terminated title.
+print_cached_kcp_title:
+        ld      a,(info_cache_valid)
+        or      a
+        ret     z
+        ld      hl,(info_cache_pointer)
+        ld      de,8
+        add     hl,de
+        ld      b,(hl)
+        ld      de,8
+        add     hl,de              ; first record at INFO+16
+print_cached_kcp_record_loop:
+        ld      a,b
+        or      a
+        ret     z
+        ld      a,(song_number)
+        cp      (hl)
+        jr      z,print_cached_kcp_record_found
+        ld      de,10
+        add     hl,de
+print_cached_kcp_skip_title:
+        ld      a,(hl)
+        inc     hl
+        or      a
+        jr      nz,print_cached_kcp_skip_title
+        djnz    print_cached_kcp_record_loop
+        ret
+print_cached_kcp_record_found:
+        ld      de,10
+        add     hl,de
+        ld      de,title_buffer
+        xor     a
+        ld      (title_length),a
+print_cached_kcp_copy_title:
+        ld      a,(hl)
+        inc     hl
+        or      a
+        jr      z,print_cached_kcp_title_ready
+        ld      c,a
+        ld      a,(title_length)
+        cp      72
+        jr      nc,print_cached_kcp_copy_title
+        ld      a,c
+        ld      (de),a
+        inc     de
+        ld      a,(title_length)
+        inc     a
+        ld      (title_length),a
+        jr      print_cached_kcp_copy_title
+print_cached_kcp_title_ready:
+        jp      print_title_buffer
 
 ; KCP files append a standard KSS INFO block directly after the extended
 ; payload. Header word 10H gives that payload size.
@@ -1364,6 +1527,21 @@ print_title_buffer:
         ld      a,(title_length)
         or      a
         ret     z
+        ld      de,title_line_position
+        ld      hl,4
+        ld      b,1
+        ld      c,WRITE
+        call    BDOS
+        ld      de,title_line_clear
+        ld      hl,79
+        ld      b,1
+        ld      c,WRITE
+        call    BDOS
+        ld      de,title_line_position
+        ld      hl,4
+        ld      b,1
+        ld      c,WRITE
+        call    BDOS
         ld      de,msg_track
         call    print_text
         ld      de,title_buffer
@@ -1373,8 +1551,11 @@ print_title_buffer:
         ld      b,1
         ld      c,WRITE
         call    BDOS
-        ld      de,msg_crlf
-        jp      print_text
+        ld      de,command_line_position
+        ld      hl,4
+        ld      b,1
+        ld      c,WRITE
+        jp      BDOS
 
 title_seek_hl:
         ld      a,(file_handle)
@@ -1528,9 +1709,13 @@ msg_dot:
 msg_loaded:
         defm    13,10,"KSS LOADED",13,10,"$"
 msg_track:
-        defm    13,10,"TRACK: $"
-msg_crlf:
-        defm    13,10,"$"
+        defm    "TRACK: $"
+title_line_position:
+        defb    0x1B,'Y',22+32,0+32
+command_line_position:
+        defb    0x1B,'Y',23+32,0+32
+title_line_clear:
+        defs    79,' '
 
 filename:       defs    64,0
 header:         defs    0x30,0
@@ -1577,8 +1762,11 @@ title_skip_left: defb   0
 title_length:   defb    0
 title_delimiter:defb    0
 title_byte:     defb    0
+info_cache_valid:defb   0
+info_cache_pointer:defw 0
 title_buffer:   defs    72,0
 title_scratch:  defs    32,0
+title_info_cache:defs   INFO_CACHE_SIZE,0
 
 player_boot_blob:
         incbin  'KSPDOS2_PLAYER.raw'
