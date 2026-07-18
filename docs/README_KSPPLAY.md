@@ -53,11 +53,14 @@ input routine switches to the next independently allocated mapper segment at
 When the complete file plus the two KCPZ work segments does not fit in the
 mapper space left free by DOS2, the loader uses sparse staging. It retains
 file segment 0 (header, maps and common template) and only the one or two
-segments containing the selected track overlay. This needs at most five free
-16K segments: three staging segments, one materialized page and one overlay
-temporary. Cursor Left/Right briefly returns to the page-0 loader to replace
-the sparse overlay and then restarts playback. A 256K FS-A1ST configuration
-with six free DOS2 mapper segments therefore plays the 118K SD Snatcher pack.
+segments containing the selected track overlay. Five free 16K segments are
+the minimum: three staging segments, one materialized page and one overlay
+temporary. If six are free, the fourth staging segment becomes a third music
+cache line. File segment 0 remains pinned, while the remaining two or three
+lines retain every compressed track overlay that fits. Cursor Left/Right only
+reads the floppy on a cache miss and then restarts playback. A 256K FS-A1ST
+configuration with six free DOS2 mapper segments therefore plays the 118K
+SD Snatcher pack and usually changes several adjacent tracks without I/O.
 
 ## MoonSound memory layout
 

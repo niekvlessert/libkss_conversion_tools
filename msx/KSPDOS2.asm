@@ -307,7 +307,9 @@ sparse_reload_entry:
         ld      sp,hl
         call    stage_file
         jp      nz,stage_read_error
-        call    print_selected_title
+        ; Do not rescan the on-disk INFO block here: a cache-hit track change
+        ; must remain free of floppy I/O. The initial launch already printed
+        ; the selected title.
         jp      launch_player
 
 ; Parse the first command-line token into filename and an optional decimal
@@ -699,10 +701,12 @@ calculate_bad:
 
 ; Use whole-file staging whenever it fits. Large compressed KCP files can be
 ; staged sparsely because their template is in file segment 0 and each packed
-; overlay occupies at most two additional 16K file segments.
+; overlay occupies at most two additional 16K file segments. Use a fourth
+; stage segment as a third cache line when DOS2 leaves enough mapper RAM.
 choose_staging_mode:
         xor     a
         ld      (sparse_mode),a
+        ld      (sparse_initialized),a
         ld      a,(stage_count)
         ld      b,a
         ld      a,(declared_banks)
@@ -725,8 +729,22 @@ choose_staging_mode:
         jr      c,choose_staging_bad
         ld      a,1
         ld      (sparse_mode),a
+        ld      a,(mapper_free)
+        ld      b,a
+        ld      a,(declared_banks)
+        ld      c,a
+        ld      a,b
+        sub     c
+        cp      4
+        jr      c,choose_staging_three
+        ld      a,4
+        jr      choose_staging_sparse_count
+choose_staging_three:
         ld      a,3
+choose_staging_sparse_count:
         ld      (stage_alloc_count),a
+        dec     a
+        ld      (sparse_cache_count),a
         or      a
         ret
 choose_staging_full:
@@ -787,10 +805,27 @@ stage_sparse_fill_table:
         inc     hl
         djnz    stage_sparse_fill_table
 
-        xor     a                   ; logical file segment 0 -> pool slot 0
-        ld      c,a
+        ld      a,(sparse_initialized)
+        or      a
+        jr      nz,stage_sparse_map_header
+        ld      a,0xFF
+        ld      (sparse_cache_tags),a
+        ld      (sparse_cache_tags+1),a
+        ld      (sparse_cache_tags+2),a
+        xor     a
+        ld      (sparse_cache_next),a
+        ld      c,a                 ; logical file segment 0 -> pool slot 0
         call    stage_sparse_segment
         ret     nz
+        ld      a,1
+        ld      (sparse_initialized),a
+        jr      stage_sparse_header_ready
+stage_sparse_map_header:
+        ; Pool slot 0 is immutable after the first load. Re-expose it for
+        ; descriptor parsing without touching the disk.
+        ld      a,(stage_pool)
+        call    mapper_put_p2
+stage_sparse_header_ready:
 
         ; Translate public song ID through KCP's page map in segment 0.
         ld      a,(song_number)
@@ -859,10 +894,8 @@ stage_sparse_offset_ready:
 stage_sparse_offset_no_carry:
         call    sparse_offset_segment
         ld      (sparse_first_segment),a
-        or      a
-        jr      z,stage_sparse_first_loaded
-        ld      c,1
-        call    stage_sparse_segment
+        ld      (sparse_protected_segment),a
+        call    stage_sparse_ensure_segment
         ret     nz
 stage_sparse_first_loaded:
         ; Determine the segment containing the packed stream's final byte.
@@ -884,10 +917,11 @@ stage_sparse_first_loaded:
         cp      b
         jr      nz,stage_sparse_bad ; one overlay may span at most two pages
         ld      a,b
-        ld      c,2
-        call    stage_sparse_segment
+        call    stage_sparse_ensure_segment
         ret     nz
 stage_sparse_done:
+        ld      a,0xFF
+        ld      (sparse_protected_segment),a
         xor     a
         ret
 stage_sparse_bad:
@@ -915,6 +949,92 @@ sparse_pointer_segment:
         add     a,a
         add     a,a
         add     a,c
+        ret
+
+; Ensure logical file segment A is resident in one of the music cache lines.
+; Cache line 0 corresponds to stage_pool+1; stage_pool itself permanently
+; contains file segment 0. A cache hit only repairs the logical stage table
+; and performs no DOS seek/read.
+stage_sparse_ensure_segment:
+        or      a
+        ret     z
+        ld      (sparse_logical_segment),a
+        ld      a,(sparse_cache_count)
+        ld      b,a
+        ld      hl,sparse_cache_tags
+        xor     a
+        ld      c,a
+stage_sparse_cache_search:
+        ld      a,(sparse_logical_segment)
+        cp      (hl)
+        jr      z,stage_sparse_cache_hit
+        inc     hl
+        inc     c
+        djnz    stage_sparse_cache_search
+
+        ; Round-robin replacement, skipping the first half of a currently
+        ; selected two-segment stream.
+        ld      a,(sparse_cache_next)
+        ld      c,a
+stage_sparse_choose_victim:
+        ld      e,c
+        ld      d,0
+        ld      hl,sparse_cache_tags
+        add     hl,de
+        ld      a,(sparse_protected_segment)
+        cp      (hl)
+        jr      nz,stage_sparse_victim_ready
+        inc     c
+        ld      a,(sparse_cache_count)
+        cp      c
+        jr      nz,stage_sparse_choose_victim
+        ld      c,0
+        jr      stage_sparse_choose_victim
+stage_sparse_victim_ready:
+        ld      a,c
+        ld      (sparse_cache_slot),a
+        inc     a
+        ld      b,a
+        ld      a,(sparse_cache_count)
+        cp      b
+        jr      nz,stage_sparse_next_ready
+        ld      b,0
+stage_sparse_next_ready:
+        ld      a,b
+        ld      (sparse_cache_next),a
+
+        ld      a,(sparse_cache_slot)
+        inc     a                   ; pool slot 1..3
+        ld      c,a
+        ld      a,(sparse_logical_segment)
+        call    stage_sparse_segment
+        ret     nz
+        ld      a,(sparse_cache_slot)
+        ld      e,a
+        ld      d,0
+        ld      hl,sparse_cache_tags
+        add     hl,de
+        ld      a,(sparse_logical_segment)
+        ld      (hl),a
+        xor     a
+        ret
+
+stage_sparse_cache_hit:
+        ld      a,c
+        ld      e,a
+        ld      d,0
+        ld      hl,stage_pool+1
+        add     hl,de
+        ld      a,(hl)
+        ld      (sparse_physical_segment),a
+        ld      a,(sparse_logical_segment)
+        ld      e,a
+        ld      d,0
+        ld      hl,stage_segments
+        add     hl,de
+        ld      a,(sparse_physical_segment)
+        ld      (hl),a
+        xor     a
         ret
 
 ; A = logical file segment, C = stage_pool index. The physical mapper ID is
@@ -1423,6 +1543,12 @@ stage_count:    defb    0
 stage_alloc_count:defb  0
 stage_index:    defb    0
 sparse_mode:    defb    0
+sparse_initialized:defb 0
+sparse_cache_count:defb 0
+sparse_cache_next:defb  0
+sparse_cache_slot:defb  0
+sparse_cache_tags:defs  3,0
+sparse_protected_segment:defb 0xFF
 sparse_logical_segment:defb 0
 sparse_physical_segment:defb 0
 sparse_first_segment:defb 0
@@ -1436,7 +1562,7 @@ input_format:   defb    0
 mapper_calls:   defw    0
 mapper_free:    defb    0
 mapper_total:   defb    0
-stage_pool:     defs    3,0
+stage_pool:     defs    4,0
 stage_segments: defs    32,0
 kss_segments:   defs    32,0
 main_segments:  defs    4,0
