@@ -42,6 +42,8 @@ PLAYER_RUNTIME_PUT_P1: equ PLAYER_RUNTIME_PUT_P0+2
 PLAYER_RUNTIME_PUT_P2: equ PLAYER_RUNTIME_PUT_P1+2
 PLAYER_RUNTIME_STACK_TOP: equ PLAYER_RUNTIME_PUT_P2+2
 PLAYER_RUNTIME_INPUT_FORMAT: equ PLAYER_RUNTIME_STACK_TOP+2
+PLAYER_RUNTIME_SPARSE_MODE: equ PLAYER_RUNTIME_INPUT_FORMAT+1
+PLAYER_RUNTIME_RELOAD_ENTRY: equ PLAYER_RUNTIME_SPARSE_MODE+1
 ; These bytes are in the unused fixed page-3 tail of the bootstrap.  The
 ; optional fourth command-line argument selects the SCC slot ID (decimal).
 PLAYER_RUNTIME_SCC_SLOT:       equ 0xD2F0
@@ -159,6 +161,8 @@ start:
 
         call    calculate_stage_count
         jp      c,file_too_large
+        call    choose_staging_mode
+        jp      c,mapper_error
         ld      de,msg_05a
         call    print_text
         ld      a,(stage_count)
@@ -169,9 +173,18 @@ start:
         call    print_text
         ld      de,msg_alloc_stage
         call    print_text
-        ld      a,(stage_segments)
+        ld      hl,stage_segments
+        ld      a,(sparse_mode)
+        or      a
+        jr      z,print_alloc_stage_ready
+        ld      hl,stage_pool
+print_alloc_stage_ready:
+        push    hl
+        ld      a,(hl)
         call    print_hex_a
-        ld      a,(stage_segments+1)
+        pop     hl
+        inc     hl
+        ld      a,(hl)
         call    print_hex_a
         ld      de,msg_alloc_kss
         call    print_text
@@ -203,6 +216,9 @@ start:
         ; and title= in the compact KSP META chunk.
         call    print_selected_title
 
+        ld      a,(sparse_mode)
+        or      a
+        jr      nz,patch_file_done
         ld      a,(file_handle)
         ld      b,a
         ld      c,CLOSE
@@ -219,6 +235,7 @@ patch_file_done:
         ; its normal BASIC-compatible state and let it take over C000H.
         ld      de,msg_08
         call    print_text
+launch_player:
         ; DOS2 console output is allowed to use the top of the TPA.  In
         ; particular, it can overwrite 7FF0H..7FF7H, so write the player
         ; handoff values only after the final BDOS call.
@@ -274,7 +291,24 @@ patch_file_done:
         ld      (PLAYER_RUNTIME_PUT_P2),hl
         ld      a,(input_format)
         ld      (PLAYER_RUNTIME_INPUT_FORMAT),a
+        ld      a,(sparse_mode)
+        ld      (PLAYER_RUNTIME_SPARSE_MODE),a
+        ld      hl,sparse_reload_entry
+        ld      (PLAYER_RUNTIME_RELOAD_ENTRY),hl
         jp      0xC000
+
+; The resident page-3 player returns here for a sparse-file track change.
+; Page 0 still contains this loader, DOS mapper/slot state has been restored,
+; and A is the new public song number. Refill only the selected source pages.
+sparse_reload_entry:
+        di
+        ld      (song_number),a
+        ld      hl,(0x0006)
+        ld      sp,hl
+        call    stage_file
+        jp      nz,stage_read_error
+        call    print_selected_title
+        jp      launch_player
 
 ; Parse the first command-line token into filename and an optional decimal
 ; song number.  MSX-DOS places the tail length at 80H and text at 81H.
@@ -456,8 +490,16 @@ capture_tpa_segments:
 ; two for raw staging, one for the relocated player, and one for F-1 banked
 ; data.
 allocate_fixed_segments:
+        ld      a,(sparse_mode)
+        or      a
+        jr      z,allocate_full_stage
+        ld      ix,stage_pool
+        ld      a,(stage_alloc_count)
+        jr      allocate_stage_list
+allocate_full_stage:
         ld      ix,stage_segments
         ld      a,(stage_count)
+allocate_stage_list:
         ld      c,a
         call    allocate_list
         ret     c
@@ -655,7 +697,51 @@ calculate_bad:
         scf
         ret
 
+; Use whole-file staging whenever it fits. Large compressed KCP files can be
+; staged sparsely because their template is in file segment 0 and each packed
+; overlay occupies at most two additional 16K file segments.
+choose_staging_mode:
+        xor     a
+        ld      (sparse_mode),a
+        ld      a,(stage_count)
+        ld      b,a
+        ld      a,(declared_banks)
+        add     a,b
+        ld      b,a
+        ld      a,(mapper_free)
+        cp      b
+        jr      nc,choose_staging_full
+        ld      a,(kcp_file)
+        or      a
+        jr      z,choose_staging_bad
+        ld      a,(header+0x24)
+        cp      'Z'
+        jr      nz,choose_staging_bad
+        ld      a,(declared_banks)
+        add     a,3
+        ld      b,a
+        ld      a,(mapper_free)
+        cp      b
+        jr      c,choose_staging_bad
+        ld      a,1
+        ld      (sparse_mode),a
+        ld      a,3
+        ld      (stage_alloc_count),a
+        or      a
+        ret
+choose_staging_full:
+        ld      a,(stage_count)
+        ld      (stage_alloc_count),a
+        or      a
+        ret
+choose_staging_bad:
+        scf
+        ret
+
 stage_file:
+        ld      a,(sparse_mode)
+        or      a
+        jp      nz,stage_sparse_file
         xor     a
         ld      (stage_index),a
 stage_loop:
@@ -687,6 +773,196 @@ stage_loop:
         cp      c
         jr      nz,stage_loop
         xor     a
+        ret
+
+; Stage segment 0 plus the one or two 16K file segments containing the
+; selected compressed overlay. Missing logical entries alias segment 0; the
+; runtime only dereferences the template and selected descriptor ranges.
+stage_sparse_file:
+        ld      a,(stage_pool)
+        ld      hl,stage_segments
+        ld      b,32
+stage_sparse_fill_table:
+        ld      (hl),a
+        inc     hl
+        djnz    stage_sparse_fill_table
+
+        xor     a                   ; logical file segment 0 -> pool slot 0
+        ld      c,a
+        call    stage_sparse_segment
+        ret     nz
+
+        ; Translate public song ID through KCP's page map in segment 0.
+        ld      a,(song_number)
+        ld      e,a
+        ld      d,0
+        ld      hl,0x8131
+        add     hl,de
+        ld      a,(hl)
+        cp      0xFF
+        jp      z,stage_sparse_bad
+        ld      e,a
+        ld      d,0
+
+        ; Overlay descriptors start at absolute file offset 0235H. Version 1
+        ; records are six bytes; version 2 records are eight bytes.
+        ld      hl,0
+        ld      a,(0x8025)
+        cp      2
+        jr      z,stage_sparse_descriptor_v2
+        ld      l,e
+        ld      h,d
+        add     hl,hl
+        add     hl,de
+        add     hl,hl              ; index * 6
+        jr      stage_sparse_descriptor_ready
+stage_sparse_descriptor_v2:
+        ld      l,e
+        ld      h,d
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl              ; index * 8
+stage_sparse_descriptor_ready:
+        ld      de,0x8235
+        add     hl,de
+        inc     hl
+        inc     hl
+        ld      e,(hl)             ; packed size
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      (sparse_packed_size),de
+        ld      e,(hl)             ; KCP-relative packed offset, low word
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        xor     a
+        ld      (sparse_source_offset+2),a
+        ld      a,(0x8025)
+        cp      2
+        jr      nz,stage_sparse_offset_ready
+        ld      a,(hl)
+        ld      (sparse_source_offset+2),a
+        inc     hl
+        ld      a,(hl)
+        or      a
+        jr      nz,stage_sparse_bad
+stage_sparse_offset_ready:
+        ex      de,hl
+        ld      de,0x21
+        add     hl,de
+        ld      (sparse_source_offset),hl
+        jr      nc,stage_sparse_offset_no_carry
+        ld      a,(sparse_source_offset+2)
+        inc     a
+        ld      (sparse_source_offset+2),a
+stage_sparse_offset_no_carry:
+        call    sparse_offset_segment
+        ld      (sparse_first_segment),a
+        or      a
+        jr      z,stage_sparse_first_loaded
+        ld      c,1
+        call    stage_sparse_segment
+        ret     nz
+stage_sparse_first_loaded:
+        ; Determine the segment containing the packed stream's final byte.
+        ld      hl,(sparse_source_offset)
+        ld      de,(sparse_packed_size)
+        add     hl,de
+        dec     hl
+        ld      (sparse_end_offset),hl
+        ld      a,(sparse_source_offset+2)
+        adc     a,0
+        ld      (sparse_end_offset+2),a
+        ld      hl,sparse_end_offset
+        call    sparse_pointer_segment
+        ld      b,a
+        ld      a,(sparse_first_segment)
+        cp      b
+        jr      z,stage_sparse_done
+        inc     a
+        cp      b
+        jr      nz,stage_sparse_bad ; one overlay may span at most two pages
+        ld      a,b
+        ld      c,2
+        call    stage_sparse_segment
+        ret     nz
+stage_sparse_done:
+        xor     a
+        ret
+stage_sparse_bad:
+        ld      a,1
+        or      a
+        ret
+
+; Return source_offset >> 14 in A.
+sparse_offset_segment:
+        ld      hl,sparse_source_offset
+sparse_pointer_segment:
+        ld      a,(hl)
+        inc     hl
+        ld      a,(hl)
+        and     0xC0
+        rrca
+        rrca
+        rrca
+        rrca
+        rrca
+        rrca
+        ld      c,a
+        inc     hl
+        ld      a,(hl)
+        add     a,a
+        add     a,a
+        add     a,c
+        ret
+
+; A = logical file segment, C = stage_pool index. The physical mapper ID is
+; installed in the corresponding logical runtime-table entry.
+stage_sparse_segment:
+        ld      (sparse_logical_segment),a
+        ld      a,c
+        ld      e,a
+        ld      d,0
+        ld      hl,stage_pool
+        add     hl,de
+        ld      a,(hl)
+        ld      (sparse_physical_segment),a
+        call    mapper_put_p2
+        ld      a,(sparse_logical_segment)
+        ld      e,a
+        ld      d,0
+        ld      hl,stage_segments
+        add     hl,de
+        ld      a,(sparse_physical_segment)
+        ld      (hl),a
+
+        ; Seek to logical_segment * 4000H (32-bit DE:HL offset).
+        ld      a,(sparse_logical_segment)
+        ld      c,a
+        and     3
+        rrca
+        rrca
+        ld      h,a
+        ld      l,0
+        ld      a,c
+        rrca
+        rrca
+        and     0x3F
+        ld      e,a
+        ld      d,0
+        ld      a,(file_handle)
+        ld      b,a
+        xor     a
+        ld      c,SEEK
+        call    BDOS
+        ret     nz
+        ld      a,(file_handle)
+        ld      b,a
+        ld      de,0x8000
+        ld      hl,0x4000
+        ld      c,READ
+        call    BDOS
         ret
 
 print_text:
@@ -1116,7 +1392,7 @@ msg_format:
 msg_large:
         defm    "KSS file is too large for mapper staging$"
 msg_mapper:
-        defm    "Not enough contiguous primary mapper segments$"
+        defm    "Not enough free primary mapper segments$"
 msg_extbio:
         defm    "EXTBIO mapper query failed$"
 msg_dos:
@@ -1144,7 +1420,15 @@ song_number:    defb    0
 scc_slot:       defb    SCC_SLOT_DEFAULT
 file_size:      defs    3,0
 stage_count:    defb    0
+stage_alloc_count:defb  0
 stage_index:    defb    0
+sparse_mode:    defb    0
+sparse_logical_segment:defb 0
+sparse_physical_segment:defb 0
+sparse_first_segment:defb 0
+sparse_source_offset:defs 3,0
+sparse_end_offset:defs 3,0
+sparse_packed_size:defw 0
 declared_banks: defb    0
 bank_end:       defb    0
 kcp_file:       defb    0
@@ -1152,6 +1436,7 @@ input_format:   defb    0
 mapper_calls:   defw    0
 mapper_free:    defb    0
 mapper_total:   defb    0
+stage_pool:     defs    3,0
 stage_segments: defs    32,0
 kss_segments:   defs    32,0
 main_segments:  defs    4,0

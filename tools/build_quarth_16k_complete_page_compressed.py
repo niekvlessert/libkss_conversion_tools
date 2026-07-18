@@ -164,11 +164,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "source", nargs="?", type=Path,
-        default=Path("vigamup/extracted/quarth_16k_complete_page.kss"),
+        default=Path("vigamup/extracted/quarth_16k_complete_page.ksp"),
     )
     parser.add_argument(
         "destination", nargs="?", type=Path,
-        default=Path("vigamup/extracted/quarth_16k_complete_page_compressed.kss"),
+        default=Path("vigamup/extracted/quarth_16k_complete_page_compressed.ksp"),
     )
     parser.add_argument("--zx0pack", type=Path, default=Path("build/zx0pack"))
     args = parser.parse_args()

@@ -1297,6 +1297,7 @@ runtime_config:
 ; KCPX materializer state.  This follows the fixed handoff block so the
 ; original bootstrap still reaches RUNTIME_CONFIG at exactly C960H.
 kcp_format:     defb    0
+kcp_version:    defb    0
 kcp_page_count: defb    0
 kcp_track_count:defb    0
 kcp_page_index: defb    0
@@ -1317,6 +1318,8 @@ kcp_engine_source:  defw 0
 kcp_common_source:  defw 0
 kcp_records_source: defw 0
 kcp_data_source:defw 0
+kcp_data_source_high:defb 0
+kcpz_source_stage:defb 0
 kcp_patch_source:defw 0
 kcp_engine_compressed_size:defw 0
 kcp_common_compressed_size:defw 0
@@ -1388,6 +1391,8 @@ kcpx_runtime_path:
         ld      (kcp_materialized_page),a
         ld      a,(song_number)
         ld      (kcp_current_song),a
+        ld      a,(RUNTIME_SPARSE_MODE)
+        ld      (kcp_key_latch),a
         call    kcpx_get_song_mapping
         jp      c,format_error
         call    kcpx_materialize_dispatch
@@ -1636,6 +1641,11 @@ kcpx_previous_decrement:
 
 kcpx_switch_song:
         di
+        ld      b,a
+        ld      a,(RUNTIME_SPARSE_MODE)
+        or      a
+        ld      a,b
+        jp      nz,kcpx_reload_sparse_song
         ld      (kcp_current_song),a
         ld      (song_number),a
         call    kcpx_silence
@@ -1654,6 +1664,19 @@ kcpx_switch_song:
         ld      a,0x3F
         ld      (0x9000),a
         jp      init_trampoline
+
+; Large KCPZ archives keep only the active compressed overlay staged. Restore
+; DOS2's mapper/slot state and return to the page-0 loader, which refills the
+; sparse stage table and launches this bootstrap again for the requested song.
+kcpx_reload_sparse_song:
+        ld      (kcp_current_song),a
+        call    kcpx_silence
+        call    kcpz_select_ram_page2
+        call    stop_runtime
+        ld      sp,(RUNTIME_STACK_TOP)
+        ld      a,(kcp_current_song)
+        ld      hl,(RUNTIME_RELOAD_ENTRY)
+        jp      (hl)
 
 kcpx_silence:
         ; Some original drivers leave page 2 in their own slot layout. Select
@@ -1687,12 +1710,19 @@ kcpx_parse:
         ld      hl,0x25
         call    kcpx_set_source
         call    kcpx_read_byte
+        ld      (kcp_version),a
         cp      1
+        jr      z,kcpx_version_ok
+        cp      2
         jp      nz,kcpx_parse_bad
+        ld      a,(kcp_format)
+        cp      6
+        jp      nz,kcpx_parse_bad
+kcpx_version_ok:
         call    kcpx_read_byte
         or      a
         jp      z,kcpx_parse_bad
-        cp      33
+        cp      0x80
         jp      nc,kcpx_parse_bad
         ld      (kcp_page_count),a
         call    kcpx_read_byte
@@ -1848,10 +1878,9 @@ kcpx_materialize_dispatch:
 
 ; Shared compressed-source decoder for generic KCPZ.
 kcpz_decompress_source:
-        ; Source stream is guaranteed by the builder to remain within one
-        ; 16K staged-file segment. Temporarily replace SCC page 2 by mapper
-        ; RAM, decode into the persistent page-1 destination, then let the
-        ; caller restore SCC after all materialization has completed.
+        ; Temporarily replace SCC page 2 by mapper RAM and decode into the
+        ; persistent page-1 destination. Compressed streams may cross staged
+        ; 16K segment boundaries; kcpz_read_source_byte advances page 2.
         push    de
         call    kcpz_select_ram_page2
         call    kcpz_map_source_page2
@@ -1913,11 +1942,32 @@ kcpz_map_source_page2:
         add     a,c
         ld      e,a
         ld      d,0
+        ld      (kcpz_source_stage),a
         ld      hl,RUNTIME_STAGE_TABLE
         add     hl,de
         ld      a,(hl)
         call    PUT_P2_DISPATCH
         di
+        ret
+
+; Advance compressed input from C000H to the next independently allocated
+; staging segment in page 2. Callers detect the boundary and preserve ZX0's
+; accumulator/flags before entering here.
+kcpz_advance_source_page2:
+        push    bc
+        push    de
+        ld      a,(kcpz_source_stage)
+        inc     a
+        ld      (kcpz_source_stage),a
+        ld      e,a
+        ld      d,0
+        ld      hl,RUNTIME_STAGE_TABLE
+        add     hl,de
+        ld      a,(hl)
+        call    PUT_P2_DISPATCH
+        pop     de
+        ld      hl,0x8000
+        pop     bc
         ret
 ; KCPZ_BOOTSTRAP_END
 
@@ -2137,6 +2187,8 @@ kcpz_materialize_selected:
         call    PUT_P1_DISPATCH
         ld      hl,(kcp_data_source)
         call    kcpx_set_source
+        ld      a,(kcp_data_source_high)
+        ld      (source_position+2),a
         ld      de,0x4000
         call    kcpz_decompress_source
 
@@ -2203,6 +2255,13 @@ kcpz_read_selected_descriptor:
         add     hl,hl
         add     hl,de
         add     hl,hl
+        ld      a,(kcp_version)
+        cp      2
+        jr      nz,kcpz_descriptor_stride_ready
+        ; Version 2 records are eight bytes, not six.
+        add     hl,de
+        add     hl,de
+kcpz_descriptor_stride_ready:
         ld      de,(kcp_records_source)
         add     hl,de
         call    kcpx_set_source
@@ -2211,9 +2270,28 @@ kcpz_read_selected_descriptor:
         call    kcpx_read_word
         ld      (kcp_data_compressed_size),hl
         call    kcpx_read_word
+        push    hl
+        xor     a
+        ld      (kcp_data_source_high),a
+        ld      a,(kcp_version)
+        cp      2
+        jr      nz,kcpz_descriptor_offset_read
+        call    kcpx_read_word
+        ld      a,h
+        or      a
+        jp      nz,kcpx_parse_bad
+        ld      a,l
+        ld      (kcp_data_source_high),a
+kcpz_descriptor_offset_read:
+        pop     hl
         ld      de,0x21
         add     hl,de
         ld      (kcp_data_source),hl
+        jr      nc,kcpz_descriptor_source_ready
+        ld      a,(kcp_data_source_high)
+        inc     a
+        ld      (kcp_data_source_high),a
+kcpz_descriptor_source_ready:
         ret
 ; KCP_MATERIALIZER_END
 
@@ -2297,7 +2375,24 @@ kcpz_zx0_decoder:
         ld      a,0x80
 kcpz_zx0_literals:
         call    kcpz_zx0_elias
-        ldir
+        ; LDIR cannot cross from staged page 2 into page 3. Keep ZX0's bit
+        ; accumulator on the fixed page-3 stack while copying literals.
+        ; Do not borrow AF': Konami engines may retain alternate-register
+        ; state across initialization and playback.
+        push    af
+kcpz_zx0_literal_loop:
+        ld      a,h
+        cp      0xC0
+        call    z,kcpz_advance_source_page2
+        ld      a,(hl)
+        inc     hl
+        ld      (de),a
+        inc     de
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,kcpz_zx0_literal_loop
+        pop     af
         add     a,a
         jr      c,kcpz_zx0_new_offset
         call    kcpz_zx0_elias
@@ -2317,6 +2412,11 @@ kcpz_zx0_new_offset:
         inc     c
         ret     z
         ld      b,c
+        push    af
+        ld      a,h
+        cp      0xC0
+        call    z,kcpz_advance_source_page2
+        pop     af
         ld      c,(hl)
         inc     hl
         rr      b
@@ -2331,6 +2431,11 @@ kcpz_zx0_elias:
 kcpz_zx0_elias_loop:
         add     a,a
         jr      nz,kcpz_zx0_elias_skip
+        push    af
+        ld      a,h
+        cp      0xC0
+        call    z,kcpz_advance_source_page2
+        pop     af
         ld      a,(hl)
         inc     hl
         rla

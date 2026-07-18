@@ -276,7 +276,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?", type=Path, default=Path("vigamup/salamander.kss"))
     parser.add_argument("destination", nargs="?", type=Path,
-                        default=Path("vigamup/extracted/salamander_complete_page.kss"))
+                        default=Path("vigamup/extracted/salamander_complete_page.ksp"))
     parser.add_argument("--trackinfo", type=Path, default=Path("vigamup/salamander.trackinfo"))
     parser.add_argument("--engine", type=Path, default=Path("vigamup/extracted/salamander.engine"))
     args = parser.parse_args()

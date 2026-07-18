@@ -247,7 +247,7 @@ run.
 
 For the stricter MSX layout, duplicating the engine in every mapper bank is
 unnecessary. `tools/build_quarth_16k_complete_page.py` writes
-`quarth_16k_complete_page.kss`, a private uncompressed `QCPX` KSSX
+`quarth_16k_complete_page.ksp`, a private uncompressed `QCPX` KSSX
 container. It stores one copy of the 4,836-byte engine-plus-wrapper template
 and one 4,817-byte common lookup template. The five logical pages contain
 only page-specific music payloads and descriptor patches:
@@ -286,7 +286,7 @@ are at `D920H` and `D950H`, and the SCC slot/magic handoff is at
 and the next opcode during common-data materialization, which restarted the
 COM entry after the first handoff.
 
-The host `kssplayer` and libkss materializer support this container. The
+The host `kspplayer` and libkss materializer support this container. The
 native MSX-DOS2 loader materializes only the selected logical page into one
 allocated physical mapper segment.
 
@@ -434,12 +434,12 @@ The player owns the rest of the operation:
    and MSX-DOS2
    mapper layout, and release the allocated segments on exit.
 
-The host kssplayer exercises the same abstraction with --mapper-base N. This
+The host kspplayer exercises the same abstraction with --mapper-base N. This
 changes where bank 0 is materialized in the emulated mapper while the Quarth
 engine continues to request logical banks 0 and 1:
 
-SDL_AUDIODRIVER=dummy build/kssplayer --mapper-base 9 \
-  --song 0 --seconds 10 vigamup/extracted/quarth_16k.kss
+SDL_AUDIODRIVER=dummy build/kspplayer --mapper-base 9 \
+  --song 0 --seconds 10 vigamup/extracted/quarth_16k_complete_page.ksp
 
 When adapting another pack, first make the uncompressed repacker use this
 gateway and validate it with a deliberately nonzero mapper base. Only then
@@ -521,11 +521,17 @@ continue without rediscovering the whole engine.
 `tools/build_konami_complete_pages.py` builds the integrated non-banked packs;
 `tools/build_konami_banked_complete_pages.py` handles layouts that already use
 KSS mapper banks. Both write the private `KCPX` (raw) or `KCPZ` (ZX0) format.
+These private containers are exported with the `.KSP` extension and played by
+`kspplayer`; they are deliberately not presented as stock-compatible KSS.
 The file contains one common 16K page-1 template plus a sparse overlay for each
 public, contiguous song ID. The original sparse song ID is retained in the
 logical-to-original table and is restored by a KCP-aware player before INIT.
 The compressed and uncompressed variants must materialize byte-identical page
 images; always verify that parity separately from comparison with the source.
+KCPZ version 1 uses six-byte overlay descriptors with 16-bit packed-data
+offsets. The builders automatically emit version 2 when a large pack crosses
+64 KiB; version 2 uses eight-byte records with a 32-bit packed-data offset.
+Both the host library and `KSPPLAY.COM` accept versions 1 and 2.
 
 Current rebuild commands are:
 
@@ -546,10 +552,15 @@ the short comparison point; its full-duration count differs only at the final
 measurement boundary for two songs. Parodius is 14/14 exact for the complete
 duration. F-1 Spirit and Nemesis 3 now have genuine one-page variants rather
 than only their older banked 16K conversions. Contra, King's Valley 2, Space
-Manbow, Solid Snake, and SD Snatcher produce active KCP images with exact
-compressed/raw parity, but are still experimental: indirect instrument,
-effect, or stream pointers diverge from the source and must not be reported as
-finished merely because audio starts.
+Manbow and Solid Snake have also passed full-duration chip-write comparison.
+SD Snatcher passes all 64/64 selected tracks. Its conversion additionally
+requires treating `4FD6H..5035H` as a command dispatch table rather than
+linearly disassembled code. Patching apparent instructions in that table can
+silently change handlers such as E1 from `50D2H` to an overlay address. Its
+F9 and FD commands encode part of a stream pointer implicitly; the repacker
+routes them through cycle-identical handlers using conventional relocatable
+16-bit operands. Keep hardware destinations in `B800H..B8FFH` physical, and
+reserve wrapper state at `4325H` separately from relocated lookup tables.
 
 Do not discard reads in `9800H..98FFH` while constructing a page. Code literals
 that address this range are SCC hardware references and stay physical, but a

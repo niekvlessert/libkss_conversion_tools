@@ -16,7 +16,8 @@ import struct
 from build_konami_complete_pages import (
     CONFIGS, FIXED_SIZE, HEADER_SIZE, PAGE_SIZE, WRAPPER_DEST, Config, common_template,
     compress, descriptor_address, disassemble_starts, info_block, make_page,
-    overlay_from_template, put_word, read_trackinfo, traced_instruction_starts,
+    overlay_from_template, put_word, read_trackinfo, read_trace_ranges,
+    traced_instruction_starts,
 )
 
 
@@ -40,12 +41,30 @@ CONFIGS.update({
                          True, 0x0070, 0x5F60,
                           ((0xFD9E, 0xFD9F, 0x42A0),
                            (0xCA5F, 0xCA60, 0x42A1),
-                           (0xCB58, 0xCB59, 0x42A2)), 0x6000),
+                           (0xCB58, 0xCB59, 0x42A2)), 0x6000,
+                         pointer_tables=((0x0DC2, 0x0E20),
+                                         (0x14F6, 0x1556),
+                                         (0x18AE, 0x19A2),
+                                         (0x24A0, 0x24AA),
+                                         (0x24E5, 0x250F)),
+                         traced_stream_commands=True,
+                         stream_pointer_offsets=((0xF9, 1), (0xFC, 2),
+                                                 (0xFD, 1)),
+                         extra_map_fill=0xC9),
     "sdsnatch": Config(9, "SD Snatcher",
                         0x4000, 0x9EAD, 0xDE40, 0xDEA9,
-                        0x6631, 0x43E0, 0x573B, 0xDEAD,
+                        0x6631, 0x43E0, 0x5739, 0xDEAD,
                         0x4000, 0x4300, 0x4000,
-                        True, 0x43E0, 0x5F60, (), 0x43E0, 0xDE00, True),
+                        True, 0x43E0, 0x5F60,
+                        ((0x4325, 0x4326, 0x7BFF),),
+                        0x43E0, 0xDE00, True,
+                        pointer_tables=((0x5739, 0x5769),
+                                        (0x59FE, 0x5AB2),
+                                        (0x6450, 0x645A),
+                                        (0x6497, 0x64C5)),
+                        traced_stream_commands=True,
+                        stream_pointer_offsets=((0xF9, 1), (0xFC, 2),
+                                                (0xFD, 1))),
 })
 
 
@@ -170,7 +189,10 @@ def disable_original_bank_switches(page: bytearray, stem: str,
         # while retaining its song-number translation and initialization.
         for source in (0xDE43, 0xDE4F):
             offset = WRAPPER_DEST - 0x4000 + source - 0xDE00
-            page[offset:offset + 2] = bytes(2)
+            # OUT (FEH),A and JR +0 are both two bytes and twelve cycles.
+            # Keeping the timing exact prevents SCC waveform updates from
+            # moving across a PLAY-frame boundary later in long tracks.
+            page[offset:offset + 2] = bytes.fromhex("18 00")
 
 
 def validate_traced_opcodes(page: bytearray, image: bytes, cfg: Config,
@@ -211,15 +233,27 @@ def write_container(stem: str, cfg: Config, rows, pages, compressed: bool,
         packed_template = compress(packer, f"{stem}-template", template)
         packed_overlays = [compress(packer, f"{stem}-overlay-{i}", overlay)
                            for i, overlay in enumerate(overlays)]
-        tail = fixed + bytes(4 + len(pages) * 6)
+        v1_data_start = FIXED_SIZE + 4 + len(pages) * 6
+        v1_offsets = []
+        cursor = v1_data_start + len(packed_template)
+        for packed in packed_overlays:
+            v1_offsets.append(cursor)
+            cursor += len(packed)
+        version = 2 if any(offset > 0xFFFF for offset in v1_offsets) else 1
+        fixed[4] = version
+        record_size = 8 if version == 2 else 6
+        tail = fixed + bytes(4 + len(pages) * record_size)
         put_word(tail, FIXED_SIZE, len(packed_template))
         put_word(tail, FIXED_SIZE + 2, len(tail))
         tail += packed_template
         for index, (raw, packed) in enumerate(zip(overlays, packed_overlays)):
-            record = FIXED_SIZE + 4 + index * 6
+            record = FIXED_SIZE + 4 + index * record_size
             put_word(tail, record, len(raw))
             put_word(tail, record + 2, len(packed))
-            put_word(tail, record + 4, len(tail))
+            if version == 2:
+                struct.pack_into("<I", tail, record + 4, len(tail))
+            else:
+                put_word(tail, record + 4, len(tail))
             tail += packed
     else:
         tail = fixed + template
@@ -257,8 +291,10 @@ def write_container(stem: str, cfg: Config, rows, pages, compressed: bool,
 def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
     cfg = CONFIGS[stem]
     rows = read_trackinfo(ROOT / "vigamup" / f"{stem}.trackinfo")
-    traces, combinations, data_ranges, executed = read_bank_traces(
-        ROOT / "vigamup" / "extracted" / f"{stem}.track_extract")
+    trace_path = ROOT / "vigamup" / "extracted" / f"{stem}.track_extract"
+    traces, combinations, data_ranges, executed = read_bank_traces(trace_path)
+    command_traces = (read_trace_ranges(trace_path, "stream_command_ranges")
+                      if cfg.traced_stream_commands else {})
     engine, banks = source_parts(stem)
     main_start = cfg.main_start or cfg.load
     source_load = {"f1spirit": 0x5F00, "nemesis3": 0x5FC0,
@@ -272,6 +308,12 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
         ROOT / "vigamup" / "extracted" / f"{stem}.track_extract",
         representative, cfg, f"{stem}-banked-main")
     instructions = sorted(set(instructions) | set(traced_instructions))
+    if stem == "sdsnatch":
+        # 4FD6H..5035H is the D0..FF command dispatch table, not code.
+        # A linear disassembly otherwise interprets overlapping table bytes as
+        # absolute operands and corrupts handler addresses per page layout.
+        instructions = [address for address in instructions
+                        if not 0x4FD6 <= address < 0x5036]
     wrapper_instructions = []
     if cfg.wrapper_end is not None:
         start = cfg.wrapper_start - source_load
@@ -303,7 +345,10 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
         try:
             page = make_page(image, cfg, track, wanted,
                              max(row[0] for row in rows) + 1, {}, instructions,
-                             wrapper_instructions)
+                             wrapper_instructions,
+                             {address
+                              for start, end in command_traces.get(track, [])
+                              for address in range(start, end)})
         except ValueError as error:
             raise ValueError(f"track {track}: {error}") from error
         validate_traced_opcodes(page, image, cfg, traced_instructions)
@@ -320,7 +365,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--zx0pack", type=Path, default=ROOT / "build" / "zx0pack")
     args = parser.parse_args()
-    suffix = "complete_page.kss" if args.uncompressed else "complete_page_compressed.kss"
+    suffix = "complete_page.ksp" if args.uncompressed else "complete_page_compressed.ksp"
     destination = args.output or ROOT / "vigamup" / "extracted" / f"{args.stem}_{suffix}"
     try:
         build(args.stem, not args.uncompressed, destination, args.zx0pack)

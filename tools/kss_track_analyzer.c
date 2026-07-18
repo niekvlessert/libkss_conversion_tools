@@ -41,6 +41,7 @@ typedef struct {
   unsigned char memory_writes[0x10000];
   unsigned char loaded_reads[0x10000];
   unsigned char music_reads[0x10000];
+  unsigned char stream_commands[0x10000];
   unsigned char *bank_reads;
   unsigned int bank_read_size;
   unsigned long scc_writes;
@@ -146,6 +147,14 @@ static void memory_read(void *context, uint32_t address, uint32_t value) {
       address < (uint32_t)trace->kss->load_adr + trace->kss->load_len &&
       !(address >= pc && address <= ((pc + 4) & 0xffff)))
     trace->loaded_reads[address] = 1;
+
+  /* Contra and Space Manbow fetch sequence bytes at 6367H and 2B9AH;
+   * after the memory read the VM PC points one byte further. Record only
+   * bytes entering their command dispatchers. This distinguishes real
+   * address operands from identical values in waveform/instrument payloads. */
+  if ((pc == 0x6368 || pc == 0x2b9b || pc == 0x0403 || pc == 0x46f7) &&
+      value >= 0xd0)
+    trace->stream_commands[address & 0xffff] = 1;
 
   if (address < 0x73c8 || address >= 0xc000) return;
   if ((0x6472 <= pc && pc < 0x73c8) || (0xc000 <= pc && pc < 0xc047))
@@ -400,6 +409,9 @@ static int analyze_one(const char *directory, const char *stem,
     print_bitmap_ranges(out, "memory_write_ranges", trace.memory_writes,
                         0, 0x10000);
     print_bitmap_ranges(out, "loaded_data_read_ranges", trace.loaded_reads,
+                        track_kss->load_adr,
+                        (uint32_t)track_kss->load_adr + track_kss->load_len);
+    print_bitmap_ranges(out, "stream_command_ranges", trace.stream_commands,
                         track_kss->load_adr,
                         (uint32_t)track_kss->load_adr + track_kss->load_len);
     for (j = 0; j < track_kss->bank_num; j++) {

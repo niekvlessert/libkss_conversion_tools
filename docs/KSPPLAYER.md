@@ -1,6 +1,6 @@
 # `kspplayer`
 
-`kspplayer` is a small command-line player for testing generated KSP and KSS archives. It renders through the patched `libkss` emulator and sends 16-bit PCM directly to the default audio device using SDL2; it does not create a WAV file. `kssplayer` is also built as a compatibility name.
+`kspplayer` is a small command-line player for testing generated KSP and KSS archives. It renders through the patched `libkss` emulator and sends 16-bit PCM directly to the default audio device using SDL2; it does not create a WAV file.
 
 For KSP files, the embedded `MWK ` samplepack is loaded automatically. The
 MoonSound player automatically looks for `yrw801.rom` in the current directory,
@@ -47,12 +47,15 @@ This exercises the same logical-to-physical mapping contract used by the MSX
 player; the engine must request a logical bank and must not choose the
 physical segment itself. For example:
 
-    SDL_AUDIODRIVER=dummy ./build/kssplayer --mapper-base 9 \
-      --song 0 --seconds 10 /path/to/quarth_16k.kss
+    SDL_AUDIODRIVER=dummy ./build/kspplayer --mapper-base 9 \
+      --song 0 --seconds 10 /path/to/quarth_16k_complete_page.ksp
 
-`quarth_16k_complete_page.kss` is also supported. Its QCPX materializer
+`quarth_16k_complete_page.ksp` is also supported. Its QCPX materializer
 builds each complete engine+music page once and maps the selected logical page
 into the `4000H..7FFFH` window, so `--mapper-base` still selects the physical
 segment range without requiring duplicate engine bytes in the file.
 
-While playing, press Escape or Ctrl-C to stop early. The player restores the terminal mode before returning to the shell.
+While playing, press Left/Right to select the previous/next track. Playback is
+reset in the existing audio device, and compact MoonSound KSP songs are
+rematerialized as needed. Press Escape or Ctrl-C to stop early. The player
+restores the terminal mode before returning to the shell.

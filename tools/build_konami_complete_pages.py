@@ -54,12 +54,23 @@ class Config:
     wrapper_start: int = 0xC000
     pack_overlays: bool = False
     exhaustive_operand_patch: bool = False
+    pointer_tables: tuple[tuple[int, int], ...] = ()
+    traced_stream_commands: bool = False
+    bootstrap_tracks: tuple[int, ...] = ()
+    stream_pointer_offsets: tuple[tuple[int, int], ...] = (
+        (0xF9, 1), (0xFD, 1), (0xFB, 2), (0xFC, 2))
+    embedded_data_ranges: tuple[tuple[int, int], ...] = ()
+    extra_map_fill: int = 0
 
 
 CONFIGS = {
     "contra": Config(1, "Contra", 0x6000, 0x4000, 0x6003, 0x6006,
                      0x6E12, 0x6000, 0x6E14, None, 0xC000, 0xC200, 0x7D00,
-                     False),
+                     pointer_tables=((0x6E14, 0x712E),),
+                     traced_stream_commands=True,
+                     stream_pointer_offsets=((0xD9, 1), (0xF9, 1),
+                                             (0xFD, 1), (0xFB, 2),
+                                             (0xFC, 2))),
     "kingsvalley2": Config(2, "King's Valley 2", 0x6000, 0x6024,
                            0xC017, 0xC020, 0x6F2E, 0x6000, 0x6F2E, 0xC024,
                            0xE000, 0xE200, 0x7D00),
@@ -68,8 +79,16 @@ CONFIGS = {
     "parodius": Config(4, "Parodius", 0x4000, 0x8024, 0xC017, 0xC020,
                        0x4268, 0x4000, 0x50EC, 0xC024, 0xE000, 0xE200, 0x7D00),
     "spacemanbow": Config(5, "Space Manbow", 0x2000, 0xA029, 0xC017,
-                          0xC025, 0x36F8, 0x2000, 0x3600, 0xC029,
-                          0xC600, 0xC900, 0x7C00),
+                          0xC025, 0x36F8, 0x2000, 0x36F8, 0xC029,
+                          0xC600, 0xC900, 0x7C00,
+                          pointer_tables=((0x2442, 0x2522),
+                                          (0x32A0, 0x32E0),
+                                          (0x358C, 0x35AC)),
+                          traced_stream_commands=True,
+                          bootstrap_tracks=(72,),
+                          stream_pointer_offsets=((0xF9, 1), (0xFD, 1),
+                                                  (0xFC, 2)),
+                          embedded_data_ranges=((0x2442, 0x2929),)),
 }
 
 
@@ -96,13 +115,15 @@ def read_trackinfo(path: Path) -> list[tuple[int, str, int, int, bool]]:
     return rows
 
 
-def read_trace_ranges(path: Path) -> dict[int, list[tuple[int, int]]]:
+def read_trace_ranges(path: Path,
+                      label: str = "loaded_data_read_ranges") -> \
+        dict[int, list[tuple[int, int]]]:
     result: dict[int, list[tuple[int, int]]] = {}
     current = None
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith("track="):
             current = int(line[6:])
-        elif line.startswith("loaded_data_read_ranges=") and current is not None:
+        elif line.startswith(label + "=") and current is not None:
             ranges = []
             value = line.split("=", 1)[1]
             if value != "none":
@@ -205,7 +226,8 @@ def traced_instruction_starts(path: Path, image: bytes, cfg: Config,
 def patch_code(page: bytearray, amap: AddressMap, source_address: int,
                destination: int, size: int, instruction_starts: list[int],
                psg_gateway: int = PSG_GATEWAY,
-               exhaustive_operand_patch: bool = False) -> int:
+               exhaustive_operand_patch: bool = False,
+               embedded_data_ranges: tuple[tuple[int, int], ...] = ()) -> int:
     start = destination - PAGE_ADDRESS
     code = page[start:start + size]
     patched = 0
@@ -220,6 +242,11 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
             found = code.find(signature, cursor)
             if found < 0:
                 break
+            source_found = source_address + found
+            if any(start <= source_found < end
+                   for start, end in embedded_data_ranges):
+                cursor = found + len(signature)
+                continue
             # Keep LD A,(FFFD/FFFE) and replace the 12-cycle OUT with the
             # equally long, equally timed JR +0.  NOPing all five bytes made
             # playback phase drift by five cycles at exact track boundaries.
@@ -227,7 +254,20 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
             cursor = found + len(signature)
             patched += 1
 
+    # Other drivers keep their saved primary-slot byte in private workspace
+    # rather than the conventional FFFD/FFFE shadow addresses.  Once the
+    # player has established page-1 RAM and page-2 SCC, every trace-proven
+    # direct OUT (A8H),A must likewise become a timing-equivalent no-op.
     for instruction in instruction_starts:
+        offset = instruction - source_address
+        if 0 <= offset and code[offset:offset + 2] == b"\xD3\xA8":
+            code[offset:offset + 2] = bytes.fromhex("18 00")
+            patched += 1
+
+    for instruction in instruction_starts:
+        if any(start <= instruction < end
+               for start, end in embedded_data_ranges):
+            continue
         offset = instruction - source_address
         if offset < 0 or offset >= len(code):
             continue
@@ -246,6 +286,9 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
         if operand is None or operand + 2 > len(code):
             continue
         absolute_operand = source_address + operand
+        if any(start <= absolute_operand < end
+               for start, end in embedded_data_ranges):
+            continue
         if absolute_operand in instruction_start_set or \
                 absolute_operand + 1 in instruction_start_set:
             continue
@@ -255,7 +298,8 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
         # KSS also happened to store song bytes at the same source addresses.
         # Code literals target the device; descriptor/stream pointers target
         # relocated data and are patched separately below.
-        if value in (0x9000, 0xB000) or 0x9800 <= value <= 0x98FF:
+        if value in (0x9000, 0xB000) or \
+                0x9800 <= value <= 0x98FF or 0xB800 <= value <= 0xB8FF:
             replacement = None
         if value == 0x0093 and replacement is None and opcode in (0xC3, 0xCD):
             replacement = psg_gateway
@@ -274,6 +318,9 @@ def patch_code(page: bytearray, amap: AddressMap, source_address: int,
                  not exhaustive_operand_patch):
             continue
         absolute_operand = source_address + operand
+        if any(start <= absolute_operand < end
+               for start, end in embedded_data_ranges):
+            continue
         if absolute_operand in instruction_start_set or \
                 absolute_operand + 1 in instruction_start_set:
             continue
@@ -308,11 +355,17 @@ def allocate_overlay_ranges(cfg: Config, ranges: list[tuple[int, int]],
                             main_destination: int,
                             main_destination_end: int) -> list[tuple[int, int, int]]:
     occupied = [(main_destination, main_destination_end),
-                (cfg.psg_gateway, cfg.psg_gateway + 8),
+                # The first eight bytes are the PSG gateway. SD Snatcher also
+                # keeps its timing-compatible F9 adapter in the following
+                # bytes; other drivers retain their original footprint.
+                (cfg.psg_gateway,
+                 cfg.psg_gateway + (32 if cfg.variant == 9 else 8)),
                 (cfg.work_dest, cfg.work_dest + cfg.work_end - cfg.work_start)]
     if cfg.wrapper_end is not None:
         occupied.append((WRAPPER_DEST,
                          WRAPPER_DEST + cfg.wrapper_end - cfg.wrapper_start))
+    if cfg.variant == 9:
+        occupied.append((0x6030, 0x6040))
     occupied.extend((destination, destination + end - source)
                     for source, end, destination in cfg.extra_maps)
     result = []
@@ -346,6 +399,7 @@ def make_page(image: bytes, cfg: Config, track: int,
               trace_ranges: list[tuple[int, int]], table_entries: int,
               stream_bounds: dict[int, int], main_instructions: list[int],
               wrapper_instructions: list[int],
+              stream_command_addresses: set[int] | None = None,
               indirect_code_targets: set[int] | None = None) -> bytearray:
     page = bytearray(PAGE_SIZE)
     amap = AddressMap()
@@ -363,22 +417,32 @@ def make_page(image: bytes, cfg: Config, track: int,
     amap.add(cfg.work_start, cfg.work_end, cfg.work_dest)
     for source, end, destination in cfg.extra_maps:
         amap.add(source, end, destination)
+        page[destination - PAGE_ADDRESS:
+             destination - PAGE_ADDRESS + end - source] = \
+            bytes((cfg.extra_map_fill & 0xFF,)) * (end - source)
 
     descriptor = descriptor_address(image, cfg, track)
+    descriptors = [(track, descriptor)] + [
+        (bootstrap_track, descriptor_address(image, cfg, bootstrap_track))
+        for bootstrap_track in cfg.bootstrap_tracks
+        if bootstrap_track != track]
     wanted = list(trace_ranges)
+    # Explicit pointer tables must be present in full.  A runtime trace may
+    # touch only the selected entries, while the engine indexes the table by
+    # instrument/effect number and expects its original contiguous layout.
+    wanted.extend(cfg.pointer_tables)
     wanted.append((cfg.song_table, cfg.song_table + 2 * table_entries))
-    wanted.append((descriptor, descriptor + 18))
-    descriptor_bytes = image_slice(image, cfg, descriptor, descriptor + 18)
-    for offset in range(2, 18, 2):
-        pointer = word(descriptor_bytes, offset)
-        if cfg.load <= pointer < cfg.load + len(image):
-            # Full-track traces supply the bytes actually consumed from every
-            # channel stream (including loop/jump destinations).  Retain the
-            # pointer word itself as a safety minimum, but do not extend it to
-            # the next game's global stream start: that used to pull unrelated
-            # songs into this page and forced otherwise unnecessary moves.
-            wanted.append((pointer, min(pointer + 2,
-                                        cfg.load + len(image))))
+    for _, item_descriptor in descriptors:
+        wanted.append((item_descriptor, item_descriptor + 18))
+        descriptor_bytes = image_slice(
+            image, cfg, item_descriptor, item_descriptor + 18)
+        for offset in range(2, 18, 2):
+            pointer = word(descriptor_bytes, offset)
+            if cfg.load <= pointer < cfg.load + len(image):
+                # Full-track traces supply the bytes actually consumed from
+                # every channel stream (including loop/jump destinations).
+                wanted.append((pointer, min(pointer + 2,
+                                            cfg.load + len(image))))
 
     # Engine and wrapper bytes already live in the template. Workspace and
     # hardware accesses must not become song payload.
@@ -419,7 +483,7 @@ def make_page(image: bytes, cfg: Config, track: int,
     patch_code(page, amap, cfg.code_start, code_destination,
                cfg.engine_end - cfg.code_start,
                main_instructions, cfg.psg_gateway,
-               cfg.exhaustive_operand_patch)
+               cfg.exhaustive_operand_patch, cfg.embedded_data_ranges)
     if cfg.wrapper_end is not None:
         patch_code(page, amap, cfg.wrapper_start, WRAPPER_DEST,
                    cfg.wrapper_end - cfg.wrapper_start, wrapper_instructions,
@@ -431,18 +495,60 @@ def make_page(image: bytes, cfg: Config, track: int,
     page[cfg.psg_gateway - PAGE_ADDRESS:cfg.psg_gateway - PAGE_ADDRESS + 8] = \
         bytes.fromhex("D3 A0 F5 7B D3 A1 F1 C9")
 
+    if cfg.variant == 9:
+        # SD Snatcher's F9 and FD handlers use the command opcode itself as
+        # the low byte of their jump target and store only the high byte in
+        # the stream. Relocation cannot retain that implicit low byte. Replace
+        # the dispatch-table entries with handlers for conventional words at
+        # +1. Their cycle counts are deliberately identical to the originals:
+        # F9=113 cycles (PUSH/POP AF supplies the removed CALL/RET delta), and
+        # FD=58 cycles (one NOP supplies the four-cycle delta).
+        f9_handler = cfg.psg_gateway + 8
+        f9_code = bytes.fromhex(
+            "13 1A 6F 13 1A 67 EB 1B F5 F1 DD 75 09 DD 74 0A C9")
+        fd_handler = 0x6030
+        fd_code = bytes.fromhex("13 1A 6F 13 1A 67 EB 1B 00 C9")
+        start = f9_handler - PAGE_ADDRESS
+        page[start:start + len(f9_code)] = f9_code
+        fd_start = fd_handler - PAGE_ADDRESS
+        page[fd_start:fd_start + len(fd_code)] = fd_code
+        for opcode, handler in ((0xF9, f9_handler), (0xFD, fd_handler)):
+            table_entry = amap.get(0x4FD6 + 2 * (opcode - 0xD0))
+            if table_entry is None:
+                raise ValueError(
+                    f"SD Snatcher dispatch entry {opcode:02X} was not mapped")
+            put_word(page, table_entry - PAGE_ADDRESS, handler)
+
     # Patch the selected table entry and its 18-byte channel descriptor.
-    table_dest = amap.get(cfg.song_table + 2 * track)
-    descriptor_dest = amap.get(descriptor)
-    if table_dest is None or descriptor_dest is None:
-        raise ValueError(f"track {track}: table/descriptor was not mapped")
-    put_word(page, table_dest - PAGE_ADDRESS, descriptor_dest)
-    for offset in range(2, 18, 2):
-        source_pointer = word(image, descriptor - cfg.load + offset)
-        destination_pointer = amap.get(source_pointer)
-        if destination_pointer is not None:
-            put_word(page, descriptor_dest - PAGE_ADDRESS + offset,
-                     destination_pointer)
+    for descriptor_track, item_descriptor in descriptors:
+        table_dest = amap.get(cfg.song_table + 2 * descriptor_track)
+        descriptor_dest = amap.get(item_descriptor)
+        if table_dest is None or descriptor_dest is None:
+            raise ValueError(
+                f"track {track}: descriptor {descriptor_track} was not mapped")
+        put_word(page, table_dest - PAGE_ADDRESS, descriptor_dest)
+        for offset in range(2, 18, 2):
+            source_pointer = word(image, item_descriptor - cfg.load + offset)
+            destination_pointer = amap.get(source_pointer)
+            if destination_pointer is not None:
+                put_word(page, descriptor_dest - PAGE_ADDRESS + offset,
+                         destination_pointer)
+
+    # Some engines use data-driven pointer tables with more than one level
+    # (instrument table -> instrument record -> waveform/effect data). Only
+    # explicitly analysed table ranges are rewritten; arbitrary music words
+    # must never be guessed to be pointers.
+    for table_start, table_end in cfg.pointer_tables:
+        address = table_start
+        while address + 1 < table_end:
+            entry_destination = amap.get(address)
+            if entry_destination is not None:
+                target = word(image, address - cfg.load)
+                mapped_target = amap.get(target)
+                if mapped_target is not None:
+                    put_word(page, entry_destination - PAGE_ADDRESS,
+                             mapped_target)
+            address += 2
 
     # Konami sequence commands F9/FD and FB/FC carry absolute stream targets.
     for source, end, destination in placements:
@@ -450,8 +556,14 @@ def make_page(image: bytes, cfg: Config, track: int,
             continue
         block = page[destination - PAGE_ADDRESS:destination - PAGE_ADDRESS + end - source]
         for offset, opcode in enumerate(block):
-            operand = offset + 1 if opcode in (0xF9, 0xFD) else \
-                      offset + 2 if opcode in (0xFB, 0xFC) else None
+            if cfg.traced_stream_commands and (stream_command_addresses is None or
+                                               source + offset not in
+                                               stream_command_addresses):
+                continue
+            pointer_offsets = dict(cfg.stream_pointer_offsets)
+            relative_offset = pointer_offsets.get(opcode)
+            operand = offset + relative_offset \
+                if relative_offset is not None else None
             if operand is None or operand + 2 > len(block):
                 continue
             target = word(block, operand)
@@ -543,10 +655,12 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
     image = data[0x10:0x10 + cfg.load_size]
     rows = read_trackinfo(trackinfo)
     traces = read_trace_ranges(trace)
+    command_traces = read_trace_ranges(trace, "stream_command_ranges")
     missing = [track for track, *_ in rows if track not in traces]
     if missing:
         raise ValueError(f"full trace missing tracks: {missing}")
-    table_entries = max(track for track, *_ in rows) + 1
+    table_entries = max([track for track, *_ in rows] +
+                        list(cfg.bootstrap_tracks)) + 1
     stream_starts = set()
     for track, *_ in rows:
         descriptor = descriptor_address(image, cfg, track)
@@ -574,7 +688,9 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
         cfg.wrapper_start,
         f"{stem}-wrapper") if cfg.wrapper_end is not None else [])
     pages = [make_page(image, cfg, track, traces[track], table_entries,
-                       stream_bounds, main_instructions, wrapper_instructions)
+                       stream_bounds, main_instructions, wrapper_instructions,
+                       {address for start, end in command_traces.get(track, [])
+                        for address in range(start, end)})
              for track, *_ in rows]
     template = common_template(pages)
     overlays = [overlay_from_template(template, page) for page in pages]
@@ -597,16 +713,28 @@ def build(stem: str, compressed: bool, destination: Path, packer: Path) -> None:
         packed_template = compress(packer, f"{stem}-template", template)
         packed_overlays = [compress(packer, f"{stem}-overlay-{i}", overlay)
                            for i, overlay in enumerate(overlays)]
-        tail = fixed + bytes(4 + len(pages) * 6)
+        v1_data_start = FIXED_SIZE + 4 + len(pages) * 6
+        v1_offsets = []
+        cursor = v1_data_start + len(packed_template)
+        for packed in packed_overlays:
+            v1_offsets.append(cursor)
+            cursor += len(packed)
+        version = 2 if any(offset > 0xFFFF for offset in v1_offsets) else 1
+        fixed[4] = version
+        record_size = 8 if version == 2 else 6
+        tail = fixed + bytes(4 + len(pages) * record_size)
         template_offset = len(tail)
         tail += packed_template
         put_word(tail, FIXED_SIZE, len(packed_template))
         put_word(tail, FIXED_SIZE + 2, template_offset)
         for index, (raw, packed) in enumerate(zip(overlays, packed_overlays)):
-            descriptor = FIXED_SIZE + 4 + index * 6
+            descriptor = FIXED_SIZE + 4 + index * record_size
             put_word(tail, descriptor, len(raw))
             put_word(tail, descriptor + 2, len(packed))
-            put_word(tail, descriptor + 4, len(tail))
+            if version == 2:
+                struct.pack_into("<I", tail, descriptor + 4, len(tail))
+            else:
+                put_word(tail, descriptor + 4, len(tail))
             tail += packed
     else:
         tail = fixed + template
@@ -653,7 +781,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--zx0pack", type=Path, default=ROOT / "build" / "zx0pack")
     args = parser.parse_args()
-    suffix = "complete_page.kss" if args.uncompressed else "complete_page_compressed.kss"
+    suffix = "complete_page.ksp" if args.uncompressed else "complete_page_compressed.ksp"
     destination = args.output or ROOT / "vigamup" / "extracted" / f"{args.stem}_{suffix}"
     try:
         build(args.stem, not args.uncompressed, destination, args.zx0pack)

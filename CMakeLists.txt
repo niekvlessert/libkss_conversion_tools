@@ -188,11 +188,15 @@ target_include_directories(kss_track_analyzer PRIVATE
   3rd_party/libkss/modules)
 target_link_libraries(kss_track_analyzer PRIVATE kss)
 
-add_executable(kspplayer src/kssplayer.c)
-# Keep the old executable name as a compatibility target. Both names use the
-# same KSP/KSS and MoonSound-capable implementation.
-add_executable(kssplayer src/kssplayer.c)
-foreach(KSSPLAYER_TARGET kspplayer kssplayer)
+add_executable(kss_write_compare tools/kss_write_compare.c)
+target_include_directories(kss_write_compare PRIVATE
+  3rd_party/libkss/src
+  3rd_party/libkss/modules
+)
+target_link_libraries(kss_write_compare PRIVATE kss)
+
+add_executable(kspplayer src/kspplayer.c)
+foreach(KSSPLAYER_TARGET kspplayer)
   target_include_directories(${KSSPLAYER_TARGET} PRIVATE
     3rd_party/libkss/src
     3rd_party/libkss/modules)
@@ -213,6 +217,6 @@ if(UNIX)
   target_link_libraries(sngpro2kss PRIVATE m)
   target_link_libraries(vigamup2kss PRIVATE m)
   target_link_libraries(kss_track_analyzer PRIVATE m)
+  target_link_libraries(kss_write_compare PRIVATE m)
   target_link_libraries(kspplayer PRIVATE m)
-  target_link_libraries(kssplayer PRIVATE m)
 endif()

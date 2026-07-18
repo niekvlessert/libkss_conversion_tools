@@ -30,7 +30,9 @@ RUNTIME_PUT_P1:       equ RUNTIME_PUT_P0+2
 RUNTIME_PUT_P2:       equ RUNTIME_PUT_P1+2
 RUNTIME_STACK_TOP:    equ RUNTIME_PUT_P2+2
 RUNTIME_INPUT_FORMAT: equ RUNTIME_STACK_TOP+2
-RUNTIME_CONFIG_END:   equ RUNTIME_INPUT_FORMAT+1
+RUNTIME_SPARSE_MODE:  equ RUNTIME_INPUT_FORMAT+1
+RUNTIME_RELOAD_ENTRY: equ RUNTIME_SPARSE_MODE+1
+RUNTIME_CONFIG_END:   equ RUNTIME_RELOAD_ENTRY+2
 STAGE_BANK:           equ 12
 
 BASIC_PTR:      equ     0x7FF0
@@ -43,8 +45,8 @@ FIELD_SCRATCH:  equ     0xC800
 ; and all copied page-3 runtime helpers above that buffer.
 ; Fixed page-3 TPA scratch area. Keep this after the complete bootstrap code
 ; and well below the runtime marker/stack reservation.
-KCPX_SCRATCH:      equ  0xD600
-KCPX_SCRATCH_SIZE: equ  0x0200
+KCPX_SCRATCH:      equ  0xD680
+KCPX_SCRATCH_SIZE: equ  0x0180
 
 STACK_TOP:      equ     0xDA00
 RETURN_STUB:    equ     0xD920

@@ -1,5 +1,5 @@
 /*
- * Small, platform-independent KSP/KSS player for testing generated archives.
+ * Small, platform-independent KSP player for testing generated archives.
  * SDL2 supplies the audio device on macOS, Linux, and Windows; libkss supplies
  * the KSS emulator and this program only connects the two.
  */
@@ -78,11 +78,20 @@ typedef struct {
 
 typedef struct {
   int active;
+  int escape_state;
+  int escape_waits;
 #if !defined(_WIN32)
   int original_flags;
   struct termios original_settings;
 #endif
 } TerminalState;
+
+typedef enum {
+  TERMINAL_NONE = 0,
+  TERMINAL_QUIT,
+  TERMINAL_PREVIOUS,
+  TERMINAL_NEXT
+} TerminalAction;
 
 static volatile sig_atomic_t stop_requested;
 
@@ -196,33 +205,57 @@ static void terminal_restore(TerminalState *terminal) {
   terminal->active = 0;
 }
 
-static int terminal_poll_quit(const TerminalState *terminal) {
+static TerminalAction terminal_poll_action(TerminalState *terminal) {
 #if defined(_WIN32)
-  (void)terminal;
   while (_kbhit()) {
-    if (_getch() == 27) {
-      return 1;
+    int key = _getch();
+    if (key == 27) {
+      return TERMINAL_QUIT;
+    }
+    if (key == 0 || key == 0xe0) {
+      if (!_kbhit()) return TERMINAL_NONE;
+      key = _getch();
+      if (key == 75) return TERMINAL_PREVIOUS;
+      if (key == 77) return TERMINAL_NEXT;
     }
   }
-  return 0;
+  return TERMINAL_NONE;
 #else
   unsigned char input[32];
   ssize_t count;
   size_t i;
 
   if (!terminal->active) {
-    return 0;
+    return TERMINAL_NONE;
   }
   count = read(STDIN_FILENO, input, sizeof(input));
   if (count <= 0) {
-    return 0;
+    if (terminal->escape_state == 1 && ++terminal->escape_waits >= 2) {
+      terminal->escape_state = 0;
+      terminal->escape_waits = 0;
+      return TERMINAL_QUIT;
+    }
+    return TERMINAL_NONE;
   }
   for (i = 0; i < (size_t)count; i++) {
-    if (input[i] == 0x1b) {
-      return 1;
+    unsigned char key = input[i];
+    terminal->escape_waits = 0;
+    if (terminal->escape_state == 0) {
+      if (key == 0x1b) terminal->escape_state = 1;
+    } else if (terminal->escape_state == 1) {
+      if (key == '[' || key == 'O') {
+        terminal->escape_state = 2;
+      } else {
+        terminal->escape_state = 0;
+        return TERMINAL_QUIT;
+      }
+    } else {
+      terminal->escape_state = 0;
+      if (key == 'C') return TERMINAL_NEXT;
+      if (key == 'D') return TERMINAL_PREVIOUS;
     }
   }
-  return 0;
+  return TERMINAL_NONE;
 #endif
 }
 
@@ -514,6 +547,93 @@ static const KSP_ENTRY *ksp_song_entry(const KSPResources *resources,
   return NULL;
 }
 
+static int adjacent_song(const KSPResources *resources, const KSS *kss,
+                         int current, int direction, int *result) {
+  if (resources && resources->is_ksp &&
+      ksp_index_is_compact(&resources->index)) {
+    uint32_t i;
+    int found = 0;
+    int candidate = direction > 0 ? 256 : -1;
+    for (i = 0; i < resources->index.entry_count; i++) {
+      const KSP_ENTRY *entry = &resources->index.entries[i];
+      int id;
+      if (strcmp(entry->type, "SONG")) continue;
+      id = (int)entry->id;
+      if ((direction > 0 && id > current && id < candidate) ||
+          (direction < 0 && id < current && id > candidate)) {
+        candidate = id;
+        found = 1;
+      }
+    }
+    if (!found) return 0;
+    *result = candidate;
+    return 1;
+  }
+
+  if ((direction > 0 && current >= kss->trk_max) ||
+      (direction < 0 && current <= kss->trk_min))
+    return 0;
+  *result = current + direction;
+  return 1;
+}
+
+static KSS *materialize_compact_song(const Options *options,
+                                     const KSPResources *resources,
+                                     uint32_t song) {
+  uint8_t *image = NULL;
+  uint32_t size = 0;
+  KSS *kss;
+  char error[256];
+
+  if (!ksp_build_kss_image_for_song(options->input, &resources->index, song,
+                                    &image, &size, error, sizeof(error))) {
+    fprintf(stderr, "error: cannot materialize compact KSP song %u: %s\n",
+            song, error);
+    return NULL;
+  }
+  kss = KSS_bin2kss(image, size, options->input);
+  free(image);
+  if (!kss)
+    fprintf(stderr, "error: compact KSP song %u is not a valid image\n", song);
+  return kss;
+}
+
+#ifdef KSS_HAVE_MOONSOUND
+static int load_embedded_mwk(const Options *options,
+                             const KSPResources *resources,
+                             KSS_MOONSOUND *moonsound, uint32_t song) {
+  const KSP_ENTRY *song_entry;
+  const KSP_ENTRY *mwk_entry = NULL;
+  uint8_t *mwk_data = NULL;
+  uint32_t mwk_id, i;
+  char error[256];
+
+  if (options->mwk_path || !resources || !resources->is_ksp || !moonsound)
+    return 1;
+  song_entry = ksp_song_entry(resources, song);
+  mwk_id = song_entry ? song_entry->aux : song;
+  for (i = 0; i < resources->index.entry_count; i++) {
+    const KSP_ENTRY *entry = &resources->index.entries[i];
+    if (entry->id == mwk_id && !strcmp(entry->type, "MWK ")) {
+      mwk_entry = entry;
+      break;
+    }
+  }
+  if (!mwk_entry) return 1;
+  if (!ksp_read_chunk(options->input, mwk_entry, &mwk_data, error,
+                      sizeof(error)) ||
+      !kss_moonsound_load_mwk_data(moonsound, mwk_data,
+                                   mwk_entry->unpacked_size, error,
+                                   sizeof(error))) {
+    free(mwk_data);
+    fprintf(stderr, "error: embedded MWK could not be loaded: %s\n", error);
+    return 0;
+  }
+  free(mwk_data);
+  return 1;
+}
+#endif
+
 static void release_ksp_resources(KSPResources *resources) {
   if (!resources)
     return;
@@ -593,7 +713,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
   }
 }
 
-static int play_audio(const Options *options, KSS *kss,
+static int play_audio(const Options *options, KSS **kss_pointer,
                       const KSPResources *resources) {
   SDL_AudioSpec desired;
   SDL_AudioSpec actual;
@@ -601,6 +721,8 @@ static int play_audio(const Options *options, KSS *kss,
   AudioState state;
   TerminalState terminal;
   const char *driver;
+  KSS *kss = *kss_pointer;
+  int current_song = options->song;
   int result = 0;
 #ifdef KSS_HAVE_MOONSOUND
   KSS_MOONSOUND *moonsound = NULL;
@@ -676,33 +798,9 @@ static int play_audio(const Options *options, KSS *kss,
       fprintf(stderr, "error: %s\n", error);
       goto cleanup;
     }
-    if (!options->mwk_path && resources && resources->is_ksp) {
-      const KSP_ENTRY *mwk_entry = NULL;
-      uint8_t *mwk_data = NULL;
-      uint32_t i;
-      const KSP_ENTRY *song_entry = ksp_song_entry(resources,
-                                                   (uint32_t)options->song);
-      uint32_t mwk_id = song_entry ? song_entry->aux : (uint32_t)options->song;
-      for (i = 0; i < resources->index.entry_count; i++) {
-        KSP_ENTRY *entry = &resources->index.entries[i];
-        if (entry->id == mwk_id &&
-            !strcmp(entry->type, "MWK ")) {
-          mwk_entry = entry;
-          break;
-        }
-      }
-      if (mwk_entry &&
-          (!ksp_read_chunk(options->input, mwk_entry, &mwk_data, error,
-                           sizeof(error)) ||
-           !kss_moonsound_load_mwk_data(moonsound, mwk_data,
-                                        mwk_entry->unpacked_size, error,
-                                        sizeof(error)))) {
-        free(mwk_data);
-        fprintf(stderr, "error: embedded MWK could not be loaded: %s\n", error);
-        goto cleanup;
-      }
-      free(mwk_data);
-    }
+    if (!load_embedded_mwk(options, resources, moonsound,
+                           (uint32_t)current_song))
+      goto cleanup;
     KSSPLAY_set_moonsound(state.player, moonsound);
     fprintf(stderr, "MoonSound: using YRW801 ROM %s\n", opl4_rom);
   }
@@ -723,12 +821,12 @@ static int play_audio(const Options *options, KSS *kss,
   }
 #endif
   if (KSSPLAY_set_data(state.player, kss) != 0) {
-    fprintf(stderr, "error: could not attach KSS data\n");
+    fprintf(stderr, "error: could not attach KSP/KSS playback data\n");
     goto cleanup;
   }
   if (options->mapper_base_set)
     KSSPLAY_set_mapper_base(state.player, (uint32_t)options->mapper_base);
-  KSSPLAY_reset(state.player, (uint32_t)options->song, 0);
+  KSSPLAY_reset(state.player, (uint32_t)current_song, 0);
   KSSPLAY_set_device_quality(state.player, KSS_DEVICE_PSG,
                              (uint32_t)options->quality);
   KSSPLAY_set_device_quality(state.player, KSS_DEVICE_SCC,
@@ -749,17 +847,70 @@ static int play_audio(const Options *options, KSS *kss,
 
   driver = SDL_GetCurrentAudioDriver();
   fprintf(stderr, "playing song %d at %u Hz, %u channel(s) via %s\n",
-          options->song, state.rate, state.channels,
+          current_song, state.rate, state.channels,
           driver ? driver : "SDL audio");
   if (!terminal_prepare(&terminal)) {
     fprintf(stderr, "warning: Escape key handling is unavailable on this terminal\n");
   }
-  fprintf(stderr, "press Escape or Ctrl-C to stop\n");
+  fprintf(stderr,
+          "press Left/Right for previous/next; Escape or Ctrl-C to stop\n");
 
   SDL_PauseAudioDevice(device, 0);
   while (!SDL_AtomicGet(&state.done) && !stop_requested) {
-    if (terminal_poll_quit(&terminal)) {
+    TerminalAction action = terminal_poll_action(&terminal);
+    if (action == TERMINAL_QUIT) {
       SDL_AtomicSet(&state.done, 1);
+    } else if (action == TERMINAL_PREVIOUS || action == TERMINAL_NEXT) {
+      int next_song;
+      int direction = action == TERMINAL_NEXT ? 1 : -1;
+      if (!adjacent_song(resources, kss, current_song, direction,
+                         &next_song)) {
+        fprintf(stderr, "no %s song\n",
+                direction > 0 ? "next" : "previous");
+      } else {
+        int compact = resources && resources->is_ksp &&
+                      ksp_index_is_compact(&resources->index);
+        KSS *next_kss = compact
+                            ? materialize_compact_song(options, resources,
+                                                       (uint32_t)next_song)
+                            : kss;
+        int attached = next_kss != NULL;
+        if (attached) {
+          SDL_LockAudioDevice(device);
+#ifdef KSS_HAVE_MOONSOUND
+          if (compact && !load_embedded_mwk(options, resources, moonsound,
+                                            (uint32_t)next_song))
+            attached = 0;
+#endif
+          if (attached && compact && KSSPLAY_set_data(state.player, next_kss) != 0) {
+            fprintf(stderr,
+                    "error: could not attach KSP/KSS playback data for song %d\n",
+                    next_song);
+            attached = 0;
+          }
+          if (attached) {
+            if (options->mapper_base_set)
+              KSSPLAY_set_mapper_base(state.player,
+                                      (uint32_t)options->mapper_base);
+            KSSPLAY_reset(state.player, (uint32_t)next_song, 0);
+            state.rendered_frames = 0;
+            state.fade_started = 0;
+            SDL_AtomicSet(&state.done, 0);
+          }
+          SDL_UnlockAudioDevice(device);
+        }
+        if (attached) {
+          if (compact) {
+            KSS_delete(kss);
+            kss = next_kss;
+            *kss_pointer = kss;
+          }
+          current_song = next_song;
+          fprintf(stderr, "playing song %d\n", current_song);
+        } else if (compact && next_kss) {
+          KSS_delete(next_kss);
+        }
+      }
     }
     SDL_Delay(25);
   }
@@ -782,8 +933,6 @@ cleanup:
 int main(int argc, char **argv) {
   Options options;
   KSS *kss;
-  uint8_t *compact_kss_image = NULL;
-  uint32_t compact_kss_size = 0;
   KSPResources resources;
   int ksp_result;
   int result;
@@ -799,19 +948,8 @@ int main(int argc, char **argv) {
     return 1;
 
   if (resources.is_ksp && ksp_index_is_compact(&resources.index)) {
-    char error[256];
-    if (!ksp_build_kss_image_for_song(options.input, &resources.index,
-                                      (uint32_t)options.song,
-                             &compact_kss_image, &compact_kss_size, error,
-                             sizeof(error))) {
-      fprintf(stderr, "error: cannot materialize compact KSP: %s\n", error);
-      release_ksp_resources(&resources);
-      return 1;
-    }
-    kss = KSS_bin2kss(compact_kss_image, compact_kss_size,
-                      options.input);
-    free(compact_kss_image);
-    compact_kss_image = NULL;
+    kss = materialize_compact_song(&options, &resources,
+                                   (uint32_t)options.song);
   } else {
     kss = KSS_load_file((char *)options.input);
   }
@@ -840,9 +978,9 @@ int main(int argc, char **argv) {
   previous_interrupt_handler = signal(SIGINT, handle_interrupt);
   if (previous_interrupt_handler == SIG_ERR) {
     fprintf(stderr, "warning: Ctrl-C handling is unavailable\n");
-    result = play_audio(&options, kss, &resources) ? 0 : 1;
+    result = play_audio(&options, &kss, &resources) ? 0 : 1;
   } else {
-    result = play_audio(&options, kss, &resources) ? 0 : 1;
+    result = play_audio(&options, &kss, &resources) ? 0 : 1;
     signal(SIGINT, previous_interrupt_handler);
   }
   KSS_delete(kss);

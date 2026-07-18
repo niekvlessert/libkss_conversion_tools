@@ -2,7 +2,7 @@
 
 `KSPPLAY.COM` is the native MSX-DOS2 player for this repository's extended
 KSP files. It supports two payload families already supported by the host
-`kssplayer`:
+`kspplayer`:
 
 - generic Konami complete pages with internal `KCPX` or `KCPZ` markers;
 - compact `KSP1` resource files containing a MoonSound `ENGN` and selected
@@ -46,6 +46,19 @@ then restores and enables the SCC slot. Logical page numbers are translated
 to physical segments allocated by DOS2; converted engines never contain
 physical segment IDs.
 
+Compressed streams are allowed to cross a 16K staged-file boundary. The ZX0
+input routine switches to the next independently allocated mapper segment at
+`C000H`; the segments do not need to be physically contiguous.
+
+When the complete file plus the two KCPZ work segments does not fit in the
+mapper space left free by DOS2, the loader uses sparse staging. It retains
+file segment 0 (header, maps and common template) and only the one or two
+segments containing the selected track overlay. This needs at most five free
+16K segments: three staging segments, one materialized page and one overlay
+temporary. Cursor Left/Right briefly returns to the page-0 loader to replace
+the sparse overlay and then restarts playback. A 256K FS-A1ST configuration
+with six free DOS2 mapper segments therefore plays the 118K SD Snatcher pack.
+
 ## MoonSound memory layout
 
 Compact KSP1 files are parsed through their trailer and KDIR directory. ENGN
@@ -73,7 +86,8 @@ back into the fixed DOS2 player, restores page 1/page 2 and terminates.
 The `msx/` directory contains `KSPPLAY.COM`, the MoonSound tests
 `ALMOSEND.KSP` and `INTRO1.KSP`, and generic Konami files:
 `QUARTH.KSP`, `SALAMAND.KSP`, `F1SPIRIT.KSP`, `NEMESIS2.KSP`,
-`NEMESIS3.KSP`, `PARODIUS.KSP`, and `KINGVAL2.KSP`.
+`NEMESIS3.KSP`, `PARODIUS.KSP`, `KINGVAL2.KSP`, `CONTRA.KSP`,
+`SPACEMAN.KSP`, `SOLIDSNK.KSP`, and `SDSNATC.KSP`.
 
 The outer 32-byte prefix remains KSSX-compatible because the host player and
 materializers use it for load/init/play metadata. The `.KSP` extension names
