@@ -55,7 +55,10 @@ builds each complete engine+music page once and maps the selected logical page
 into the `4000H..7FFFH` window, so `--mapper-base` still selects the physical
 segment range without requiring duplicate engine bytes in the file.
 
-While playing, press Left/Right to select the previous/next track. Playback is
-reset in the existing audio device, and compact MoonSound KSP songs are
-rematerialized as needed. Press Escape or Ctrl-C to stop early. The player
-restores the terminal mode before returning to the shell.
+While playing, the player shows the track number and title when metadata is
+available. Tracks automatically continue with the next track when another
+track exists. Press Left/Right to select the previous/next track manually;
+playback is paused while the emulation image and MoonSound state are replaced,
+and compact MoonSound KSP songs are rematerialized as needed. Press Escape or
+Ctrl-C to stop early. The player restores the terminal mode before returning
+to the shell.

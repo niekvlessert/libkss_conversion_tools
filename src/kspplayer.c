@@ -70,6 +70,8 @@ typedef struct {
   uint8_t channels;
   uint64_t total_frames;
   uint64_t rendered_frames;
+  uint64_t auto_end_frames;
+  int auto_advance;
   int fade_seconds;
   int loops;
   int fade_started;
@@ -577,6 +579,101 @@ static int adjacent_song(const KSPResources *resources, const KSS *kss,
   return 1;
 }
 
+static const KSSINFO *track_info(const KSS *kss, int song) {
+  uint32_t i;
+
+  if (!kss || !kss->info) return NULL;
+  for (i = 0; i < kss->info_num; i++) {
+    if (kss->info[i].song == song) return &kss->info[i];
+  }
+  return NULL;
+}
+
+static const char *ksp_song_title(const Options *options,
+                                  const KSPResources *resources, int song) {
+  static char title[51];
+  const KSP_ENTRY *entry;
+  uint8_t *data = NULL;
+  char error[128];
+  size_t length;
+
+  if (!options || !resources || !resources->is_ksp ||
+      !ksp_index_is_compact(&resources->index))
+    return NULL;
+  entry = ksp_song_entry(resources, (uint32_t)song);
+  if (!entry || !ksp_read_chunk(options->input, entry, &data, error,
+                                sizeof(error)) || entry->unpacked_size <= 0xE2u) {
+    free(data);
+    return NULL;
+  }
+  length = entry->unpacked_size - 0xE2u;
+  if (length > 50u) length = 50u;
+  memcpy(title, data + 0xE2u, length);
+  free(data);
+  title[length] = '\0';
+  while (length > 0 && (title[length - 1] == ' ' || title[length - 1] == '\t'))
+    title[--length] = '\0';
+  return title[0] ? title : NULL;
+}
+
+static void print_playing_message(const Options *options,
+                                  const KSPResources *resources,
+                                  const KSS *kss, int song, uint32_t rate,
+                                  uint8_t channels, const char *driver) {
+  const KSSINFO *info = track_info(kss, song);
+  const char *title = info && info->title[0]
+                          ? info->title
+                          : (kss && kss->title[0] ? (const char *)kss->title
+                                                   : ksp_song_title(options,
+                                                                    resources,
+                                                                    song));
+
+  if (title) {
+    fprintf(stderr, "playing %d - %s at %u Hz, %u channel(s) via %s\n",
+            song, title, rate, channels, driver ? driver : "SDL audio");
+  } else {
+    fprintf(stderr, "playing song %d at %u Hz, %u channel(s) via %s\n",
+            song, rate, channels, driver ? driver : "SDL audio");
+  }
+}
+
+static void set_track_duration(AudioState *state, const KSS *kss, int song,
+                               int requested_seconds) {
+  const KSSINFO *info = track_info(kss, song);
+  uint64_t requested_frames = (uint64_t)state->rate *
+                              (uint64_t)requested_seconds;
+
+  state->total_frames = requested_frames;
+  state->auto_end_frames = 0;
+  state->auto_advance = 1;
+  if (info && info->time_in_ms > 0) {
+    state->auto_end_frames = ((uint64_t)info->time_in_ms * state->rate) / 1000u;
+    if (state->auto_end_frames > requested_frames)
+      state->auto_end_frames = 0;
+  }
+}
+
+static void configure_player_output(KSSPLAY *player, const Options *options,
+                                    uint8_t channels) {
+  KSSPLAY_set_device_quality(player, KSS_DEVICE_PSG,
+                             (uint32_t)options->quality);
+  KSSPLAY_set_device_quality(player, KSS_DEVICE_SCC,
+                             (uint32_t)options->quality);
+  KSSPLAY_set_device_quality(player, KSS_DEVICE_OPLL,
+                             (uint32_t)options->quality);
+  if (channels == 2) {
+    KSSPLAY_set_device_pan(player, KSS_DEVICE_PSG, -32);
+    KSSPLAY_set_device_pan(player, KSS_DEVICE_SCC, 32);
+    player->opll_stereo = 1;
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 0, 1);
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 1, 2);
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 2, 1);
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 3, 2);
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 4, 1);
+    KSSPLAY_set_channel_pan(player, KSS_DEVICE_OPLL, 5, 2);
+  }
+}
+
 static KSS *materialize_compact_song(const Options *options,
                                      const KSPResources *resources,
                                      uint32_t song) {
@@ -710,6 +807,13 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
 
   if (state->rendered_frames >= state->total_frames) {
     SDL_AtomicSet(&state->done, 1);
+  } else if (state->auto_advance && state->auto_end_frames > 0 &&
+             state->rendered_frames >= state->auto_end_frames) {
+    SDL_AtomicSet(&state->done, 1);
+  } else if (state->auto_advance && state->auto_end_frames == 0 &&
+             state->rendered_frames >= (uint64_t)state->rate * 5u &&
+             KSSPLAY_get_stop_flag(state->player)) {
+    SDL_AtomicSet(&state->done, 1);
   }
 }
 
@@ -762,9 +866,9 @@ static int play_audio(const Options *options, KSS **kss_pointer,
 
   state.rate = (uint32_t)actual.freq;
   state.channels = actual.channels;
-  state.total_frames = (uint64_t)state.rate * (uint64_t)options->seconds;
   state.fade_seconds = options->fade_seconds;
   state.loops = options->loops;
+  set_track_duration(&state, kss, current_song, options->seconds);
   state.player = KSSPLAY_new(state.rate, state.channels, 16);
   if (!state.player) {
     fprintf(stderr, "error: could not create KSS player\n");
@@ -846,9 +950,8 @@ static int play_audio(const Options *options, KSS **kss_pointer,
   }
 
   driver = SDL_GetCurrentAudioDriver();
-  fprintf(stderr, "playing song %d at %u Hz, %u channel(s) via %s\n",
-          current_song, state.rate, state.channels,
-          driver ? driver : "SDL audio");
+  print_playing_message(options, resources, kss, current_song, state.rate,
+                        state.channels, driver);
   if (!terminal_prepare(&terminal)) {
     fprintf(stderr, "warning: Escape key handling is unavailable on this terminal\n");
   }
@@ -856,17 +959,30 @@ static int play_audio(const Options *options, KSS **kss_pointer,
           "press Left/Right for previous/next; Escape or Ctrl-C to stop\n");
 
   SDL_PauseAudioDevice(device, 0);
-  while (!SDL_AtomicGet(&state.done) && !stop_requested) {
+  while (!stop_requested) {
     TerminalAction action = terminal_poll_action(&terminal);
+    int automatic_next = 0;
+
+    if (SDL_AtomicGet(&state.done)) {
+      if (state.auto_advance) {
+        action = TERMINAL_NEXT;
+        automatic_next = 1;
+      } else {
+        break;
+      }
+    }
     if (action == TERMINAL_QUIT) {
       SDL_AtomicSet(&state.done, 1);
+      break;
     } else if (action == TERMINAL_PREVIOUS || action == TERMINAL_NEXT) {
       int next_song;
       int direction = action == TERMINAL_NEXT ? 1 : -1;
       if (!adjacent_song(resources, kss, current_song, direction,
                          &next_song)) {
-        fprintf(stderr, "no %s song\n",
-                direction > 0 ? "next" : "previous");
+        if (automatic_next) {
+          break;
+        }
+        fprintf(stderr, "no %s song\n", direction > 0 ? "next" : "previous");
       } else {
         int compact = resources && resources->is_ksp &&
                       ksp_index_is_compact(&resources->index);
@@ -875,29 +991,63 @@ static int play_audio(const Options *options, KSS **kss_pointer,
                                                        (uint32_t)next_song)
                             : kss;
         int attached = next_kss != NULL;
+        KSSPLAY *old_player = NULL;
         if (attached) {
+          /* Stop callbacks while replacing the emulation image. This is
+           * important for compact MoonSound songs: reset changes both the
+           * KSS memory map and the shared OPL4 state. */
+          SDL_PauseAudioDevice(device, 1);
           SDL_LockAudioDevice(device);
 #ifdef KSS_HAVE_MOONSOUND
           if (compact && !load_embedded_mwk(options, resources, moonsound,
                                             (uint32_t)next_song))
             attached = 0;
 #endif
-          if (attached && compact && KSSPLAY_set_data(state.player, next_kss) != 0) {
-            fprintf(stderr,
-                    "error: could not attach KSP/KSS playback data for song %d\n",
-                    next_song);
-            attached = 0;
+          {
+            int replace_player = compact;
+#ifdef KSS_HAVE_MOONSOUND
+            replace_player = compact && moonsound == NULL;
+#endif
+            if (replace_player) {
+              KSSPLAY *replacement = KSSPLAY_new(state.rate, state.channels, 16);
+              if (!replacement || KSSPLAY_set_data(replacement, next_kss) != 0) {
+                KSSPLAY_delete(replacement);
+                fprintf(stderr,
+                        "error: could not attach KSS playback data for song %d\n",
+                        next_song);
+                attached = 0;
+              } else {
+                if (options->mapper_base_set)
+                  KSSPLAY_set_mapper_base(replacement,
+                                          (uint32_t)options->mapper_base);
+                KSSPLAY_reset(replacement, (uint32_t)next_song, 0);
+                configure_player_output(replacement, options, state.channels);
+                old_player = state.player;
+                state.player = replacement;
+              }
+            } else if (compact &&
+                       KSSPLAY_set_data(state.player, next_kss) != 0) {
+              fprintf(stderr,
+                      "error: could not attach KSP/KSS playback data for song %d\n",
+                      next_song);
+              attached = 0;
+            }
           }
           if (attached) {
-            if (options->mapper_base_set)
-              KSSPLAY_set_mapper_base(state.player,
-                                      (uint32_t)options->mapper_base);
-            KSSPLAY_reset(state.player, (uint32_t)next_song, 0);
+            if (old_player == NULL) {
+              if (options->mapper_base_set)
+                KSSPLAY_set_mapper_base(state.player,
+                                        (uint32_t)options->mapper_base);
+              KSSPLAY_reset(state.player, (uint32_t)next_song, 0);
+            }
+            set_track_duration(&state, next_kss, next_song, options->seconds);
             state.rendered_frames = 0;
             state.fade_started = 0;
             SDL_AtomicSet(&state.done, 0);
           }
           SDL_UnlockAudioDevice(device);
+          SDL_PauseAudioDevice(device, 0);
+          KSSPLAY_delete(old_player);
         }
         if (attached) {
           if (compact) {
@@ -906,7 +1056,8 @@ static int play_audio(const Options *options, KSS **kss_pointer,
             *kss_pointer = kss;
           }
           current_song = next_song;
-          fprintf(stderr, "playing song %d\n", current_song);
+          print_playing_message(options, resources, kss, current_song,
+                                state.rate, state.channels, driver);
         } else if (compact && next_kss) {
           KSS_delete(next_kss);
         }

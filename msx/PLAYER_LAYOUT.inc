@@ -45,8 +45,8 @@ FIELD_SCRATCH:  equ     0xC800
 ; and all copied page-3 runtime helpers above that buffer.
 ; Fixed page-3 TPA scratch area. Keep this after the complete bootstrap code
 ; and well below the runtime marker/stack reservation.
-KCPX_SCRATCH:      equ  0xD680
-KCPX_SCRATCH_SIZE: equ  0x0180
+KCPX_SCRATCH:      equ  0xD700
+KCPX_SCRATCH_SIZE: equ  0x0100
 
 STACK_TOP:      equ     0xDA00
 RETURN_STUB:    equ     0xD920

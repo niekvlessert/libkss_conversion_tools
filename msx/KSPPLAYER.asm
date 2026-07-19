@@ -1338,6 +1338,7 @@ kcp_chunk_size: defw    0
 ksp_directory:      defw 0
 ksp_entry_cursor:   defw 0
 ksp_entry_count:    defb 0
+ksp_track_count:    defb 0
 ksp_found:          defb 0
 ksp_entry_id:       defw 0
 ksp_entry_offset:   defw 0
@@ -2466,6 +2467,25 @@ ksp_runtime_path:
         call    PUT_P2_DISPATCH
         jp      0xB800
 
+; Re-entered from the fixed page-2 loop after page 3 has been restored.
+; The complete KSP remains staged in mapper RAM, so changing between
+; self-contained MWM SONG chunks requires no DOS or floppy access.
+ksp_switch_song:
+        ld      (song_number),a
+        ld      sp,(RUNTIME_STACK_TOP)
+        call    ksp_parse_directory
+        jp      c,format_error
+        call    ksp_materialize
+        jp      c,format_error
+        call    ksp_install_engine_patches
+        call    ksp_install_page2_runtime
+        ld      a,(RUNTIME_KSS_TABLE)
+        call    PUT_P1_DISPATCH
+        call    kcpz_select_ram_page2
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        call    PUT_P2_DISPATCH
+        jp      0xB800
+
 ksp_finish_exit:
         di
         call    stop_runtime
@@ -2525,6 +2545,7 @@ ksp_parse_directory:
         call    kcpx_read_word
         xor     a
         ld      (ksp_found),a
+        ld      (ksp_track_count),a
         ld      hl,(ksp_directory)
         ld      de,16
         add     hl,de
@@ -2649,6 +2670,9 @@ ksp_match_song:
         ld      a,(hl)
         cp      'G'
         ret     nz
+        ld      a,(ksp_track_count)
+        inc     a
+        ld      (ksp_track_count),a
         ld      hl,(ksp_entry_id)
         ld      a,h
         or      a
@@ -2949,6 +2973,10 @@ ksp_install_page2_runtime:
         ld      (0xB800+(ksp_page2_init_target-ksp_page2_runtime)+1),hl
         ld      hl,(play_address)
         ld      (0xB800+(ksp_page2_play_target-ksp_page2_runtime)+1),hl
+        ld      a,(song_number)
+        ld      (0xB800+(ksp_page2_current_song-ksp_page2_runtime)),a
+        ld      a,(ksp_track_count)
+        ld      (0xB800+(ksp_page2_track_count-ksp_page2_runtime)),a
         ret
 
 ; This block is copied to B800H. All internal control transfers are relative
@@ -2989,6 +3017,7 @@ ksp_page2_play_target:
         ld      hl,0
         jp      (hl)
 ksp_page2_after_play:
+        ; Escape is row 7 bit 2. Right and Left are row 8 bits 0 and 3.
         in      a,(0xAA)
         ld      e,a
         and     0xF0
@@ -2997,10 +3026,64 @@ ksp_page2_after_play:
         in      a,(0xA9)
         cpl
         bit     2,a
+        jr      nz,ksp_page2_exit_key
+
+        ld      a,e
+        and     0xF0
+        or      8
+        out     (0xAA),a
+        in      a,(0xA9)
+        cpl
+        and     0x09
+        ld      b,a
         ld      a,e
         out     (0xAA),a
-        jr      z,ksp_page2_play_loop
+        ld      a,b
+        or      a
+        jr      nz,ksp_page2_cursor_pressed
+        xor     a
+        ld      (0xB800+(ksp_page2_key_latch-ksp_page2_runtime)),a
+        jr      ksp_page2_play_loop
 
+ksp_page2_cursor_pressed:
+        ld      a,(0xB800+(ksp_page2_key_latch-ksp_page2_runtime))
+        or      a
+        jr      nz,ksp_page2_play_loop
+        ld      a,1
+        ld      (0xB800+(ksp_page2_key_latch-ksp_page2_runtime)),a
+        bit     0,b
+        jr      nz,ksp_page2_next_song
+
+        ld      a,(0xB800+(ksp_page2_current_song-ksp_page2_runtime))
+        or      a
+        jr      nz,ksp_page2_previous_decrement
+        ld      a,(0xB800+(ksp_page2_track_count-ksp_page2_runtime))
+ksp_page2_previous_decrement:
+        dec     a
+        jr      ksp_page2_select_song
+
+ksp_page2_next_song:
+        ld      a,(0xB800+(ksp_page2_current_song-ksp_page2_runtime))
+        inc     a
+        ld      c,a
+        ld      a,(0xB800+(ksp_page2_track_count-ksp_page2_runtime))
+        cp      c
+        ld      a,c
+        jr      nz,ksp_page2_select_song
+        xor     a
+ksp_page2_select_song:
+        ld      (0xB800+(ksp_page2_next_song_value-ksp_page2_runtime)),a
+        ld      a,1
+        ld      (0xB800+(ksp_page2_switch_flag-ksp_page2_runtime)),a
+        jr      ksp_page2_begin_silence
+
+ksp_page2_exit_key:
+        ld      a,e
+        out     (0xAA),a
+        xor     a
+        ld      (0xB800+(ksp_page2_switch_flag-ksp_page2_runtime)),a
+
+ksp_page2_begin_silence:
         di
         ld      a,4
         out     (0xC0),a
@@ -3075,7 +3158,21 @@ ksp_page2_silence_done:
 ksp_page2_original_p3:
         ld      a,0
         out     (0xFF),a
-        jp      ksp_finish_exit
+        ld      a,(0xB800+(ksp_page2_switch_flag-ksp_page2_runtime))
+        or      a
+        jp      z,ksp_finish_exit
+        ld      a,(0xB800+(ksp_page2_next_song_value-ksp_page2_runtime))
+        jp      ksp_switch_song
+ksp_page2_key_latch:
+        defb    1
+ksp_page2_current_song:
+        defb    0
+ksp_page2_track_count:
+        defb    0
+ksp_page2_next_song_value:
+        defb    0
+ksp_page2_switch_flag:
+        defb    0
 ksp_page2_runtime_end:
 
 ; Generic complete-page images have a one-byte load image at file offset 20H

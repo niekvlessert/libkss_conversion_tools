@@ -17,10 +17,11 @@ KSPPLAY QUARTH.KSP 0
 KSPPLAY ALMOSEND.KSP 0
 ```
 
-The optional second argument is the song ID and defaults to zero. For Konami
-files Cursor Left/Right changes songs, Space restarts, and Escape or Ctrl-C
-silences the chips and returns to DOS2. MoonSound resource files currently
-support command-line selection and Escape.
+The optional second argument is the song ID and defaults to zero. Cursor
+Left/Right changes songs, wrapping at both ends, and Escape or Ctrl-C silences
+the chips and returns to DOS2. Space also restarts Konami songs. Live
+MoonSound switching is supported for compact resource packs containing
+multiple self-contained MWM `SONG` chunks that do not require an MWK wavebank.
 
 The player prints the selected track title before playback. Konami titles
 come from the existing INFO records; compact MoonSound titles come from the
@@ -81,8 +82,15 @@ Page 3  temporary MBWave work RAM (DA00H state)
 
 The B800H loop keeps interrupts disabled and uses VDP status-register 0 as a
 CPU-speed-independent 60 Hz clock, so playback has the same tempo in Z80 and
-R800 modes. Escape silences OPL4, restores the original page-3 segment, jumps
-back into the fixed DOS2 player, restores page 1/page 2 and terminates.
+R800 modes. It scans Escape and the cursor keys without calling DOS while the
+temporary page-3 work segment is visible. Escape silences OPL4, restores the
+original page-3 segment, jumps back into the fixed DOS2 player, restores page
+1/page 2 and terminates.
+
+For Cursor Left/Right the loop first silences OPL4 and restores the original
+page 3, then reparses and rematerializes the selected `SONG` from the KSP data
+already staged in mapper RAM. The shared `ENGN` is installed again and
+playback restarts without reopening the file or reading the floppy.
 
 ## Canonical files
 

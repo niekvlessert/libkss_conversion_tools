@@ -102,6 +102,8 @@ static void memory_read(void *context, uint32_t address, uint32_t value) {
       (pc == 0x081a && address != 0x081a) ||
       (pc == 0x081b && address != 0x081b) ||
       (pc == 0x081c && address != 0x081c) ||
+      (pc == 0x06fe && address != 0x06fe) ||
+      (pc == 0x4572 && address != 0x4572) ||
       (pc == 0x67aa && address != 0x67aa) ||
       (pc == 0x67ab && address != 0x67ab) ||
       (pc == 0x67ac && address != 0x67ac))

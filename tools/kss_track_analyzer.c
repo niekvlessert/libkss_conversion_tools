@@ -152,8 +152,8 @@ static void memory_read(void *context, uint32_t address, uint32_t value) {
    * after the memory read the VM PC points one byte further. Record only
    * bytes entering their command dispatchers. This distinguishes real
    * address operands from identical values in waveform/instrument payloads. */
-  if ((pc == 0x6368 || pc == 0x2b9b || pc == 0x0403 || pc == 0x46f7) &&
-      value >= 0xd0)
+  if (((pc == 0x6368 || pc == 0x2b9b || pc == 0x0403 || pc == 0x46f7) &&
+       value >= 0xd0) || pc == 0x06fe)
     trace->stream_commands[address & 0xffff] = 1;
 
   if (address < 0x73c8 || address >= 0xc000) return;
