@@ -1,5 +1,15 @@
 This directory is a bit messy, some information.
 
+First clone & build instructions... tested on Mac only but should work onthers. Python is required for the other tools.
+
+```
+git clone --recursive https://github.com/niekvlessert/libkss_conversion_tools
+mkdir build
+cd build
+cmake ..
+make
+```
+
 Some goals I had kind of, using AI:
 
 - Playing KSS files on MSX
