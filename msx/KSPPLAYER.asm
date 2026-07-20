@@ -625,6 +625,15 @@ map_source_page1:
         add     a,c
         ld      e,a
         ld      d,0
+        ld      a,(RUNTIME_SPARSE_MODE)
+        cp      2
+        jr      nz,map_source_page1_staged
+        ld      a,e
+        ld      b,0
+        call    ksp_call_direct_helper
+        di
+        ret
+map_source_page1_staged:
         ld      hl,RUNTIME_STAGE_TABLE
         add     hl,de
         ld      a,(hl)
@@ -1335,28 +1344,44 @@ kcp_remaining:  defw    0
 kcp_chunk_size: defw    0
 
 ; Compact resource-KSP materializer state (MoonSound engine type 1).
-ksp_directory:      defw 0
-ksp_entry_cursor:   defw 0
-ksp_entry_count:    defb 0
-ksp_track_count:    defb 0
-ksp_found:          defb 0
-ksp_entry_id:       defw 0
-ksp_entry_offset:   defw 0
-ksp_entry_packed:   defw 0
-ksp_entry_unpacked: defw 0
-ksp_entry_compression: defb 0
-ksp_engine_offset:  defw 0
+; Parser temporaries overlay KCP state because the two runtime paths are
+; mutually exclusive. Offset 13 is deliberately left to kcpx_read_byte's
+; kcp_value scratch byte.
+ksp_directory:          equ kcp_format+0       ; 3 bytes
+ksp_entry_cursor:       equ kcp_format+3       ; 3 bytes
+ksp_directory_count:    equ kcp_format+6
+ksp_entry_count:        equ kcp_format+7
+ksp_found:              equ kcp_format+8
+ksp_entry_id:           equ kcp_format+9       ; 2 bytes
+ksp_entry_id_high:      equ kcp_format+11      ; 2 bytes
+ksp_entry_offset:       equ kcp_format+14      ; 3 bytes
+ksp_entry_packed:       equ kcp_format+17      ; 3 bytes
+ksp_entry_unpacked:     equ kcp_format+20      ; 3 bytes
+ksp_entry_compression:  equ kcp_format+23
+ksp_entry_aux:          equ kcp_format+24      ; 4 bytes
+ksp_dword_high:         equ kcp_format+28
+ksp_song_aux:           equ kcp_format+29      ; 4 bytes
+ksp_type:               equ kcp_format+33      ; 4 bytes
+
+; Values retained after directory parsing.
+ksp_engine_offset:  defs 3,0
 ksp_engine_packed:  defw 0
 ksp_engine_size:    defw 0
 ksp_engine_compression: defb 0
-ksp_song_offset:    defw 0
+ksp_song_offset:    defs 3,0
 ksp_song_packed:    defw 0
 ksp_song_size:      defw 0
 ksp_song_compression: defb 0
-ksp_type:           defs 4,0
+ksp_mwk_offset:     defs 3,0
+ksp_mwk_size:       defs 3,0
+ksp_mwk_id:         defw 0
+ksp_mwk_required:   defb 0
+ksp_track_count:    defb 0
 mwm_raw_cursor:     defw 0
 mwm_compact_cursor: defw 0
 mwm_patterns_left:  defb 0
+ksp_mwk_direct_final:defb 0
+
 
 ; Kept after the fixed handoff block so the player can retain its C960H
 ; runtime configuration without growing into the resident page-3 helpers.
@@ -2456,8 +2481,16 @@ kcpz_zx0_elias_backtrack:
 ksp_runtime_path:
         call    ksp_parse_directory
         jp      c,format_error
+        ; Stream the optional wavekit before constructing the engine/song
+        ; pages. The uploader may reuse a staging cache line as its DOS
+        ; buffer; materializing afterwards guarantees pristine playback data.
+        call    ksp_prepare_work_segment
+        jp      c,format_error
+        ld      b,2
+        call    ksp_call_direct_helper
         call    ksp_materialize
         jp      c,format_error
+        call    ksp_clear_work_segment
         call    ksp_install_engine_patches
         call    ksp_install_page2_runtime
         ld      a,(RUNTIME_KSS_TABLE)
@@ -2468,15 +2501,20 @@ ksp_runtime_path:
         jp      0xB800
 
 ; Re-entered from the fixed page-2 loop after page 3 has been restored.
-; The complete KSP remains staged in mapper RAM, so changing between
-; self-contained MWM SONG chunks requires no DOS or floppy access.
+; The engine/music and directory stay staged in mapper RAM. Associated MWK
+; data is streamed from the still-open DOS file into MoonSound during reload.
 ksp_switch_song:
         ld      (song_number),a
         ld      sp,(RUNTIME_STACK_TOP)
         call    ksp_parse_directory
         jp      c,format_error
+        call    ksp_prepare_work_segment
+        jp      c,format_error
+        ld      b,2
+        call    ksp_call_direct_helper
         call    ksp_materialize
         jp      c,format_error
+        call    ksp_clear_work_segment
         call    ksp_install_engine_patches
         call    ksp_install_page2_runtime
         ld      a,(RUNTIME_KSS_TABLE)
@@ -2494,24 +2532,33 @@ ksp_finish_exit:
         ld      bc,0
         jp      0x0005
 
+; Invoke the DOS-backed compact-KSP helper that remains resident in page 0.
+ksp_call_direct_helper:
+        ld      ix,(RUNTIME_DIRECT_HELPER)
+        jp      (ix)
+
 ksp_parse_directory:
-        ld      a,(file_size+2)
-        or      a
-        jp      nz,ksp_parse_bad
+        ; Locate the 16-byte tail fields inside the 24-byte KSP1 trailer.
         ld      hl,(file_size)
+        ld      a,(file_size+2)
         ld      de,16
         or      a
         sbc     hl,de
-        jp      c,ksp_parse_bad
-        call    kcpx_set_source
-        call    kcpx_read_word
+        jr      nc,ksp_trailer_position_ok
+        or      a
+        jp      z,ksp_parse_bad
+        dec     a
+ksp_trailer_position_ok:
+        ld      (source_position),hl
+        ld      (source_position+2),a
+        call    ksp_read_dword24
+        ret     c
         ld      (ksp_directory),hl
-        call    kcpx_read_word
-        ld      a,h
-        or      l
-        jp      nz,ksp_parse_bad
-        ld      hl,(ksp_directory)
-        call    kcpx_set_source
+        ld      a,(ksp_dword_high)
+        ld      (ksp_directory+2),a
+
+        ld      hl,ksp_directory
+        call    ksp_set_source_from_hl
         call    kcpx_read_byte
         cp      'K'
         jp      nz,ksp_parse_bad
@@ -2541,23 +2588,24 @@ ksp_parse_directory:
         ld      a,l
         or      a
         jp      z,ksp_parse_bad
-        ld      (ksp_entry_count),a
+        ld      (ksp_directory_count),a
         call    kcpx_read_word
+        ld      a,h
+        or      l
+        jp      nz,ksp_parse_bad
+        call    kcpx_read_word         ; directory flags
+        call    kcpx_read_word
+
         xor     a
         ld      (ksp_found),a
+        ld      (ksp_mwk_required),a
         ld      (ksp_track_count),a
-        ld      hl,(ksp_directory)
-        ld      de,16
-        add     hl,de
-        ld      (ksp_entry_cursor),hl
+        call    ksp_prepare_scan
 ksp_parse_entry_loop:
         call    ksp_read_entry
         jp      c,ksp_parse_bad
         call    ksp_match_entry
-        ld      hl,(ksp_entry_cursor)
-        ld      de,32
-        add     hl,de
-        ld      (ksp_entry_cursor),hl
+        call    ksp_advance_entry_cursor
         ld      a,(ksp_entry_count)
         dec     a
         ld      (ksp_entry_count),a
@@ -2566,15 +2614,89 @@ ksp_parse_entry_loop:
         and     3
         cp      3
         jr      nz,ksp_parse_bad
+
+        ; SONG.aux is either FFFFFFFFH (no wavekit) or the MWK chunk ID.
+        ld      a,(ksp_song_aux+0)
+        cp      0xFF
+        jr      nz,ksp_song_has_mwk
+        ld      a,(ksp_song_aux+1)
+        cp      0xFF
+        jr      nz,ksp_song_has_mwk
+        ld      a,(ksp_song_aux+2)
+        cp      0xFF
+        jr      nz,ksp_song_has_mwk
+        ld      a,(ksp_song_aux+3)
+        cp      0xFF
+        jr      nz,ksp_song_has_mwk
+        or      a
+        ret
+ksp_song_has_mwk:
+        ld      a,(ksp_song_aux+2)
+        ld      b,a
+        ld      a,(ksp_song_aux+3)
+        or      b
+        jr      nz,ksp_parse_bad
+        ld      hl,(ksp_song_aux)
+        ld      (ksp_mwk_id),hl
+        ld      a,1
+        ld      (ksp_mwk_required),a
+        call    ksp_prepare_scan
+ksp_parse_mwk_loop:
+        call    ksp_read_entry
+        jr      c,ksp_parse_bad
+        call    ksp_match_mwk
+        ld      a,(ksp_found)
+        and     4
+        jr      nz,ksp_parse_ok
+        call    ksp_advance_entry_cursor
+        ld      a,(ksp_entry_count)
+        dec     a
+        ld      (ksp_entry_count),a
+        jr      nz,ksp_parse_mwk_loop
+        jr      ksp_parse_bad
+ksp_parse_ok:
         or      a
         ret
 ksp_parse_bad:
         scf
         ret
 
-ksp_read_entry:
+ksp_prepare_scan:
+        ld      a,(ksp_directory_count)
+        ld      (ksp_entry_count),a
+        ld      hl,(ksp_directory)
+        ld      de,16
+        add     hl,de
+        ld      (ksp_entry_cursor),hl
+        ld      a,(ksp_directory+2)
+        adc     a,0
+        ld      (ksp_entry_cursor+2),a
+        ret
+
+ksp_advance_entry_cursor:
         ld      hl,(ksp_entry_cursor)
-        call    kcpx_set_source
+        ld      de,32
+        add     hl,de
+        ld      (ksp_entry_cursor),hl
+        ret     nc
+        ld      a,(ksp_entry_cursor+2)
+        inc     a
+        ld      (ksp_entry_cursor+2),a
+        ret
+
+ksp_set_source_from_hl:
+        ld      e,(hl)
+        inc     hl
+        ld      d,(hl)
+        inc     hl
+        ld      a,(hl)
+        ld      (source_position),de
+        ld      (source_position+2),a
+        ret
+
+ksp_read_entry:
+        ld      hl,ksp_entry_cursor
+        call    ksp_set_source_from_hl
         call    kcpx_read_byte
         ld      (ksp_type+0),a
         call    kcpx_read_byte
@@ -2583,38 +2705,54 @@ ksp_read_entry:
         ld      (ksp_type+2),a
         call    kcpx_read_byte
         ld      (ksp_type+3),a
-        call    ksp_read_dword16
-        ret     c
+        call    kcpx_read_word
         ld      (ksp_entry_id),hl
-        call    ksp_read_dword16
+        call    kcpx_read_word
+        ld      (ksp_entry_id_high),hl
+        call    ksp_read_dword24
         ret     c
         ld      (ksp_entry_offset),hl
-        call    ksp_read_dword16
+        ld      a,(ksp_dword_high)
+        ld      (ksp_entry_offset+2),a
+        call    ksp_read_dword24
         ret     c
         ld      (ksp_entry_packed),hl
-        call    ksp_read_dword16
+        ld      a,(ksp_dword_high)
+        ld      (ksp_entry_packed+2),a
+        call    ksp_read_dword24
         ret     c
         ld      (ksp_entry_unpacked),hl
+        ld      a,(ksp_dword_high)
+        ld      (ksp_entry_unpacked+2),a
         call    kcpx_read_word         ; CRC32, validated by host tools
         call    kcpx_read_word
-        call    kcpx_read_word
+        call    kcpx_read_word         ; compression
         ld      a,h
         or      a
-        jr      nz,ksp_parse_bad
+        jp      nz,ksp_parse_bad
         ld      a,l
-        cp      2
-        jr      nc,ksp_parse_bad
         ld      (ksp_entry_compression),a
-        call    kcpx_read_word
+        call    kcpx_read_word         ; flags
+        call    kcpx_read_byte
+        ld      (ksp_entry_aux+0),a
+        call    kcpx_read_byte
+        ld      (ksp_entry_aux+1),a
+        call    kcpx_read_byte
+        ld      (ksp_entry_aux+2),a
+        call    kcpx_read_byte
+        ld      (ksp_entry_aux+3),a
         or      a
         ret
 
-ksp_read_dword16:
+; Read a little-endian dword that must fit the staged 24-bit file space.
+; Returns low 16 bits in HL and the third byte in ksp_dword_high.
+ksp_read_dword24:
         call    kcpx_read_word
         push    hl
-        call    kcpx_read_word
-        ld      a,h
-        or      l
+        call    kcpx_read_byte
+        ld      (ksp_dword_high),a
+        call    kcpx_read_byte
+        or      a
         pop     hl
         ret     z
         scf
@@ -2641,8 +2779,16 @@ ksp_match_entry:
         ld      a,h
         or      l
         ret     nz
+        ld      hl,(ksp_entry_id_high)
+        ld      a,h
+        or      l
+        ret     nz
+        call    ksp_validate_small_entry
+        jp      c,ksp_parse_bad
         ld      hl,(ksp_entry_offset)
         ld      (ksp_engine_offset),hl
+        ld      a,(ksp_entry_offset+2)
+        ld      (ksp_engine_offset+2),a
         ld      hl,(ksp_entry_packed)
         ld      (ksp_engine_packed),hl
         ld      hl,(ksp_entry_unpacked)
@@ -2673,6 +2819,10 @@ ksp_match_song:
         ld      a,(ksp_track_count)
         inc     a
         ld      (ksp_track_count),a
+        ld      hl,(ksp_entry_id_high)
+        ld      a,h
+        or      l
+        ret     nz
         ld      hl,(ksp_entry_id)
         ld      a,h
         or      a
@@ -2680,19 +2830,95 @@ ksp_match_song:
         ld      a,(song_number)
         cp      l
         ret     nz
+        call    ksp_validate_small_entry
+        jp      c,ksp_parse_bad
         ld      hl,(ksp_entry_offset)
         ld      (ksp_song_offset),hl
+        ld      a,(ksp_entry_offset+2)
+        ld      (ksp_song_offset+2),a
         ld      hl,(ksp_entry_packed)
         ld      (ksp_song_packed),hl
         ld      hl,(ksp_entry_unpacked)
         ld      (ksp_song_size),hl
         ld      a,(ksp_entry_compression)
         ld      (ksp_song_compression),a
+        ; Preserve this SONG's association while later entries are scanned.
+        ld      hl,(ksp_entry_aux)
+        ld      (ksp_song_aux+0),hl
+        ld      hl,(ksp_entry_aux+2)
+        ld      (ksp_song_aux+2),hl
         ld      a,(ksp_found)
         or      2
         ld      (ksp_found),a
         ret
 
+ksp_validate_small_entry:
+        ld      a,(ksp_entry_packed+2)
+        or      a
+        jr      nz,ksp_small_bad
+        ld      a,(ksp_entry_unpacked+2)
+        or      a
+        jr      nz,ksp_small_bad
+        ld      a,(ksp_entry_compression)
+        cp      2
+        jr      nc,ksp_small_bad
+        or      a
+        ret
+ksp_small_bad:
+        scf
+        ret
+
+ksp_match_mwk:
+        ld      hl,ksp_type
+        ld      a,(hl)
+        cp      'M'
+        ret     nz
+        inc     hl
+        ld      a,(hl)
+        cp      'W'
+        ret     nz
+        inc     hl
+        ld      a,(hl)
+        cp      'K'
+        ret     nz
+        inc     hl
+        ld      a,(hl)
+        cp      ' '
+        ret     nz
+        ld      hl,(ksp_entry_id_high)
+        ld      a,h
+        or      l
+        ret     nz
+        ld      hl,(ksp_entry_id)
+        ld      de,(ksp_mwk_id)
+        or      a
+        sbc     hl,de
+        ret     nz
+        ld      a,(ksp_entry_compression)
+        or      a
+        jp      nz,ksp_parse_bad
+        ld      hl,(ksp_entry_packed)
+        ld      de,(ksp_entry_unpacked)
+        or      a
+        sbc     hl,de
+        jp      nz,ksp_parse_bad
+        ld      a,(ksp_entry_packed+2)
+        ld      b,a
+        ld      a,(ksp_entry_unpacked+2)
+        cp      b
+        jp      nz,ksp_parse_bad
+        ld      hl,(ksp_entry_offset)
+        ld      (ksp_mwk_offset),hl
+        ld      a,(ksp_entry_offset+2)
+        ld      (ksp_mwk_offset+2),a
+        ld      hl,(ksp_entry_unpacked)
+        ld      (ksp_mwk_size),hl
+        ld      a,(ksp_entry_unpacked+2)
+        ld      (ksp_mwk_size+2),a
+        ld      a,(ksp_found)
+        or      4
+        ld      (ksp_found),a
+        ret
 ksp_materialize:
         ld      hl,(load_address)
         ld      de,0x4000
@@ -2710,6 +2936,9 @@ ksp_materialize:
         ld      a,(ksp_engine_compression)
         or      a
         jr      z,ksp_engine_stream_ok
+        ld      a,(RUNTIME_SPARSE_MODE)
+        cp      2
+        jr      z,ksp_engine_stream_ok
         ld      hl,(ksp_engine_offset)
         ld      de,(ksp_engine_packed)
         call    ksp_check_single_stage
@@ -2717,6 +2946,9 @@ ksp_materialize:
 ksp_engine_stream_ok:
         ld      a,(ksp_song_compression)
         or      a
+        jr      z,ksp_song_stream_ok
+        ld      a,(RUNTIME_SPARSE_MODE)
+        cp      2
         jr      z,ksp_song_stream_ok
         ld      hl,(ksp_song_offset)
         ld      de,(ksp_song_packed)
@@ -2733,8 +2965,21 @@ ksp_song_stream_ok:
         ld      (hl),a
         ldir
         call    kcpz_select_ram_page2
-        ld      hl,(ksp_engine_offset)
-        call    kcpx_set_source
+        ld      hl,ksp_engine_offset
+        call    ksp_set_source_from_hl
+        ld      a,(RUNTIME_SPARSE_MODE)
+        cp      2
+        jr      nz,ksp_engine_staged_source
+        ld      a,(ksp_engine_compression)
+        or      a
+        jr      z,ksp_engine_staged_source
+        ld      hl,(ksp_engine_packed)
+        ld      a,(RUNTIME_KSS_TABLE)
+        ld      de,0x4000
+        ld      b,1
+        call    ksp_call_direct_helper
+        jr      ksp_engine_done
+ksp_engine_staged_source:
         call    kcpz_map_source_page2
         ld      hl,(source_position)
         ld      a,h
@@ -2751,8 +2996,25 @@ ksp_song_stream_ok:
 ksp_decode_engine:
         call    kcpz_zx0_decoder
 ksp_engine_done:
-        ld      hl,(ksp_song_offset)
-        call    kcpx_set_source
+        ld      hl,ksp_song_offset
+        call    ksp_set_source_from_hl
+        ld      a,(RUNTIME_SPARSE_MODE)
+        cp      2
+        jr      nz,ksp_song_staged_source
+        ld      a,(ksp_song_compression)
+        or      a
+        jr      z,ksp_song_staged_source
+        ld      hl,(ksp_song_packed)
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        ld      de,0x4000
+        ld      b,1
+        call    ksp_call_direct_helper
+        ld      a,(RUNTIME_KSS_TABLE)
+        call    PUT_P1_DISPATCH
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        call    PUT_P2_DISPATCH
+        jr      ksp_song_done
+ksp_song_staged_source:
         call    map_source_page1
         ld      a,(RUNTIME_KSS_TABLE+1)
         call    PUT_P2_DISPATCH
@@ -2780,8 +3042,24 @@ ksp_song_done:
         call    PUT_P1_DISPATCH
         call    ksp_compact_mwm
         ret     c
-        ; Third allocated segment becomes page-3 MBWave work RAM only while
-        ; the page-2 resident playback loop is active.
+        ; The DOS2 loader placed the optional MWK uploader in the third
+        ; segment. It is cleared into MBWave work RAM after the upload.
+        or      a
+        ret
+
+ksp_prepare_work_segment:
+        ld      a,(ksp_mwk_required)
+        or      a
+        ret     z
+        ld      a,(RUNTIME_KSS_TABLE+2)
+        call    PUT_P2_DISPATCH
+        call    0x8000
+        jr      c,ksp_prepare_work_failed
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        call    PUT_P2_DISPATCH
+        or      a
+        ret
+ksp_clear_work_segment:
         ld      a,(RUNTIME_KSS_TABLE+2)
         call    PUT_P2_DISPATCH
         xor     a
@@ -2793,6 +3071,11 @@ ksp_song_done:
         ld      a,(RUNTIME_KSS_TABLE+1)
         call    PUT_P2_DISPATCH
         or      a
+        ret
+ksp_prepare_work_failed:
+        ld      a,(RUNTIME_KSS_TABLE+1)
+        call    PUT_P2_DISPATCH
+        scf
         ret
 
 ksp_check_single_stage:
@@ -2987,6 +3270,18 @@ ksp_page2_runtime:
 ksp_page2_work_segment:
         ld      a,0
         out     (0xFF),a
+        ; The switch path muted the global OPL4 mixer. Restore a neutral
+        ; mixer before MBWave INIT; the engine may override it afterwards.
+        ld      a,0xF8
+        out     (0x7E),a
+        xor     a
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
+        ld      a,0xF9
+        out     (0x7E),a
+        xor     a
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
         ld      hl,0xB800+(ksp_page2_after_init-ksp_page2_runtime)
         push    hl
         xor     a
@@ -3017,7 +3312,8 @@ ksp_page2_play_target:
         ld      hl,0
         jp      (hl)
 ksp_page2_after_play:
-        ; Escape is row 7 bit 2. Right and Left are row 8 bits 0 and 3.
+        ; Escape is row 7 bit 2. On invariant row 8, Space is bit 0,
+        ; Left is bit 4 and Right is bit 7. Space and Right select next.
         in      a,(0xAA)
         ld      e,a
         and     0xF0
@@ -3034,24 +3330,26 @@ ksp_page2_after_play:
         out     (0xAA),a
         in      a,(0xA9)
         cpl
-        and     0x09
+        and     0x91              ; Space, Left, Right
         ld      b,a
         ld      a,e
         out     (0xAA),a
         ld      a,b
         or      a
-        jr      nz,ksp_page2_cursor_pressed
+        jr      nz,ksp_page2_select_pressed
         xor     a
         ld      (0xB800+(ksp_page2_key_latch-ksp_page2_runtime)),a
         jr      ksp_page2_play_loop
 
-ksp_page2_cursor_pressed:
+ksp_page2_select_pressed:
         ld      a,(0xB800+(ksp_page2_key_latch-ksp_page2_runtime))
         or      a
         jr      nz,ksp_page2_play_loop
         ld      a,1
         ld      (0xB800+(ksp_page2_key_latch-ksp_page2_runtime)),a
-        bit     0,b
+        bit     0,b               ; Space
+        jr      nz,ksp_page2_next_song
+        bit     7,b               ; Right
         jr      nz,ksp_page2_next_song
 
         ld      a,(0xB800+(ksp_page2_current_song-ksp_page2_runtime))
@@ -3085,75 +3383,92 @@ ksp_page2_exit_key:
 
 ksp_page2_begin_silence:
         di
+        ; Stop the MoonSound FM timers/IRQs through its default FM ports.
+        ; C0-C3 are MSX-AUDIO (or an optional alternate MoonSound mapping),
+        ; not the default MoonSound interface used by this player.
         ld      a,4
-        out     (0xC0),a
+        out     (0xC4),a
         ld      a,0x80
-        out     (0xC1),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
-        ; Globally attenuate both OPL3/FM and OPL4/PCM outputs. This is
-        ; independent of envelope release times and guarantees immediate
-        ; silence even if a song left unusual per-channel state behind.
+        out     (0xC5),a
+        call    0xB800+(ksp_page2_fm_wait-ksp_page2_runtime)
+
+        ; Mute the OPL4 FM and PCM mixers via WAVE registers F8/F9.
         ld      a,0xF8
-        out     (0xC4),a
+        out     (0x7E),a
         ld      a,0x3F
-        out     (0xC5),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
         ld      a,0xF9
-        out     (0xC4),a
+        out     (0x7E),a
         ld      a,0x3F
-        out     (0xC5),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
+
+        ; Key off all 18 FM channels in both OPL3 register arrays.
         ld      d,0xB0
         ld      b,9
 ksp_page2_silence_fm0:
         ld      a,d
-        out     (0xC0),a
+        out     (0xC4),a
         xor     a
-        out     (0xC1),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0xC5),a
+        call    0xB800+(ksp_page2_fm_wait-ksp_page2_runtime)
         inc     d
         djnz    ksp_page2_silence_fm0
         ld      d,0xB0
         ld      b,9
 ksp_page2_silence_fm1:
         ld      a,d
-        out     (0xC2),a
+        out     (0xC6),a
         xor     a
-        out     (0xC3),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0xC7),a
+        call    0xB800+(ksp_page2_fm_wait-ksp_page2_runtime)
         inc     d
         djnz    ksp_page2_silence_fm1
-        ; Maximum attenuation mutes every wave slot immediately. Plain
-        ; key-off alone follows the sample's release rate and sounds stuck.
+
+        ; Directly attenuate and damp all 24 OPL4 wave slots. The previous
+        ; code accidentally sent these register numbers to the FM ports, so
+        ; wave key-on state survived a SONG reload and broke retriggering.
         ld      d,0x50
         ld      b,24
 ksp_page2_silence_wave_level:
         ld      a,d
-        out     (0xC4),a
+        out     (0x7E),a
         ld      a,0xFF
-        out     (0xC5),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
         inc     d
         djnz    ksp_page2_silence_wave_level
         ld      d,0x68
         ld      b,24
 ksp_page2_silence_wave:
         ld      a,d
-        out     (0xC4),a
+        out     (0x7E),a
         ld      a,0x40              ; key off + damp
-        out     (0xC5),a
-        call    0xB800+(ksp_page2_opl_wait-ksp_page2_runtime)
+        out     (0x7F),a
+        call    0xB800+(ksp_page2_wave_wait-ksp_page2_runtime)
         inc     d
         djnz    ksp_page2_silence_wave
         jr      ksp_page2_silence_done
-ksp_page2_opl_wait:
+
+ksp_page2_fm_wait:
         push    bc
         ld      b,16
-ksp_page2_opl_wait_loop:
-        in      a,(0xC0)
-        djnz    ksp_page2_opl_wait_loop
+ksp_page2_fm_wait_loop:
+        in      a,(0xC4)
+        djnz    ksp_page2_fm_wait_loop
         pop     bc
         ret
+
+ksp_page2_wave_wait:
+        push    bc
+        ld      b,16
+ksp_page2_wave_wait_loop:
+        in      a,(0x7E)
+        djnz    ksp_page2_wave_wait_loop
+        pop     bc
+        ret
+
 ksp_page2_silence_done:
 ksp_page2_original_p3:
         ld      a,0

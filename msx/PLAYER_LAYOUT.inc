@@ -32,7 +32,9 @@ RUNTIME_STACK_TOP:    equ RUNTIME_PUT_P2+2
 RUNTIME_INPUT_FORMAT: equ RUNTIME_STACK_TOP+2
 RUNTIME_SPARSE_MODE:  equ RUNTIME_INPUT_FORMAT+1
 RUNTIME_RELOAD_ENTRY: equ RUNTIME_SPARSE_MODE+1
-RUNTIME_CONFIG_END:   equ RUNTIME_RELOAD_ENTRY+2
+RUNTIME_FILE_HANDLE:  equ RUNTIME_RELOAD_ENTRY+2
+RUNTIME_DIRECT_HELPER: equ RUNTIME_FILE_HANDLE+1
+RUNTIME_CONFIG_END:   equ RUNTIME_DIRECT_HELPER+2
 STAGE_BANK:           equ 12
 
 BASIC_PTR:      equ     0x7FF0
@@ -40,13 +42,12 @@ BASIC_SIZE:     equ     0x7FF3
 BASIC_STATE:    equ     0x7FF6
 BASIC_SONG:     equ     0x7FF7
 FIELD_SCRATCH:  equ     0xC800
-; Complete-page materialization runs from the enlarged C000H bootstrap,
-; which now ends just below D400H. Keep its transfer buffer at D400H-D7FFH
-; and all copied page-3 runtime helpers above that buffer.
-; Fixed page-3 TPA scratch area. Keep this after the complete bootstrap code
-; and well below the runtime marker/stack reservation.
-KCPX_SCRATCH:      equ  0xD700
-KCPX_SCRATCH_SIZE: equ  0x0100
+; The compact-KSP parser may occupy the lower part of D680H-D7FFH. KCP and
+; compact-KSP execution are mutually exclusive: KCP uses this region as its
+; materialization scratch only after the compact-KSP path has been rejected.
+; Keep both the retained player code and KCP scratch below PUT_P0_DISPATCH.
+KCPX_SCRATCH:      equ  0xD680
+KCPX_SCRATCH_SIZE: equ  0x0180
 
 STACK_TOP:      equ     0xDA00
 RETURN_STUB:    equ     0xD920
@@ -65,16 +66,16 @@ PAGE2_RESTORE_SAVED: equ 0xCC9E
 PAGE1_RESTORE_SAVED: equ 0xCC9F
 BANK0_HANDLER:  equ     0xCD00
 BANK1_HANDLER:  equ     0xCE00
-CUSTOM_ENASLT:  equ     0xD840
-PUT_P0_DISPATCH: equ    0xD800
-PUT_P1_DISPATCH: equ    0xD810
-PUT_P2_DISPATCH: equ    0xD820
-RST28_SAVED:    equ     0xD880
-RST28_INSTALLED: equ   0xD884
-SLOT_A8_SAVED:  equ     0xD885
-SLOT_FFFF_SAVED: equ    0xD886
-HTIMI_SAVED:    equ     0xD888
-HTIMI_INSTALLED: equ   0xD88D
+PUT_P0_DISPATCH: equ    0xD9C0
+PUT_P1_DISPATCH: equ    0xD9C4
+PUT_P2_DISPATCH: equ    0xD9C8
+CUSTOM_ENASLT:  equ     0xD9D0
+RST28_SAVED:    equ     0xD910
+RST28_INSTALLED: equ   0xD914
+SLOT_A8_SAVED:  equ     0xD915
+SLOT_FFFF_SAVED: equ    0xD916
+HTIMI_SAVED:    equ     0xD918
+HTIMI_INSTALLED: equ   0xD91D
 ; Keep the bootstrap SCC handoff above all copied runtime helpers and below
 ; the KCPX scratch buffer. CC9FH used to overlap the enlarged KCPX parser.
 RUNTIME_MARKER: equ     0xD9F0
