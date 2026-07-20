@@ -1,0 +1,137 @@
+--- a/msx/PLAYER_LAYOUT.inc
++++ b/msx/PLAYER_LAYOUT.inc
+@@ -66,6 +66,9 @@
+ BANK0_HANDLER:  equ     0xCD00
+ BANK1_HANDLER:  equ     0xCE00
+ CUSTOM_ENASLT:  equ     0xD840
++; Runtime-only KCP overlay switch gateway for chunked SCC+ packs.
++; A = internal KCP page index.
++KCP_PAGE_GATEWAY: equ     0xD8A0
+ PUT_P0_DISPATCH: equ    0xD800
+ PUT_P1_DISPATCH: equ    0xD810
+ PUT_P2_DISPATCH: equ    0xD820
+--- a/msx/KSPPLAYER.asm
++++ b/msx/KSPPLAYER.asm
+@@ -1400,6 +1400,12 @@
+         call    kcpx_materialize_dispatch
+         jp      c,format_error
+ 
++        ; Install the fixed page-3 gateway called by chunk-aware engines.
++        ld      hl,kcp_page_gateway
++        ld      de,KCP_PAGE_GATEWAY
++        ld      bc,kcp_page_gateway_end-kcp_page_gateway
++        ldir
++
+         ; Keep the KCPX parser/materializer resident for live track changes.
+         ; The legacy runtime installer would overwrite it with bank handlers
+         ; and SCC shadow buffers, none of which this complete-page path uses.
+@@ -1689,7 +1695,18 @@
+         call    CUSTOM_ENASLT
+         ld      a,0x3F
+         ld      (0x9000),a
++        ; Enable SCC-I/SCC+ mode and silence all six volume registers.
++        ld      a,0x20
++        ld      (0xBFFE),a
++        ld      a,0x80
++        ld      (0xB000),a
+         xor     a
++        ld      hl,0xB8AA
++        ld      b,6
++kcp_silence_sccplus:
++        ld      (hl),a
++        inc     hl
++        djnz    kcp_silence_sccplus
+         ld      hl,0x9880
+         ld      b,16
+ kcpx_silence_scc:
+@@ -2160,6 +2177,90 @@
+         ld      (kcp_dest_offset),hl
+         jr      kcpx_buffer_copy_record
+ 
++; Replace only the selected sparse overlay. KCPX records are copied directly
++; from staged storage. KCPZ records are ZX0-expanded into the temporary mapper
++; segment and applied through page 2. Neither path recopies the 16K template.
++kcp_materialize_overlay_only:
++        ld      a,(kcp_format)
++        cp      5
++        jr      z,kcpx_materialize_overlay_only
++        cp      6
++        jr      z,kcpz_materialize_overlay_only
++        scf
++        ret
++
++kcpx_materialize_overlay_only:
++        ld      a,(RUNTIME_KSS_TABLE)
++        ld      (kcp_selected_segment),a
++        ld      (kcp_dest_segment),a
++        ld      hl,(kcp_records_source)
++        ld      (kcp_cursor),hl
++        ld      a,(kcp_selected_page)
++        ld      (kcp_page_index),a
++        jp      kcpx_overlay_scan
++
++kcpz_materialize_overlay_only:
++        ld      a,(RUNTIME_KSS_TABLE)
++        ld      (kcp_selected_segment),a
++        ld      a,(RUNTIME_KSS_TABLE+1)
++        ld      (kcp_temp_segment),a
++        call    kcpz_read_selected_descriptor
++
++        ; Decode only the selected overlay into the temporary segment.
++        ld      a,(kcp_temp_segment)
++        ld      (kcp_dest_segment),a
++        call    PUT_P1_DISPATCH
++        ld      hl,(kcp_data_source)
++        call    kcpx_set_source
++        ld      a,(kcp_data_source_high)
++        ld      (source_position+2),a
++        ld      de,0x4000
++        call    kcpz_decompress_source
++
++        ; Apply its sparse records to the already-running page-1 image.
++        ld      a,(kcp_selected_segment)
++        ld      (kcp_dest_segment),a
++        call    PUT_P1_DISPATCH
++        call    kcpz_select_ram_page2
++        ld      a,(kcp_temp_segment)
++        call    PUT_P2_DISPATCH
++        ld      hl,0x8000
++        ld      de,(kcp_data_size)
++        ld      (kcp_remaining),de
++        jp      kcpz_overlay_loop
++
++; This block is copied to KCP_PAGE_GATEWAY (D8A0H). A contains the internal
++; logical page. It is called with interrupts disabled from the page-1 engine.
++kcp_page_gateway:
++        push    af
++        push    bc
++        push    de
++        push    hl
++        push    ix
++        push    iy
++        ld      (kcp_selected_page),a
++        call    kcp_materialize_overlay_only
++        jr      c,kcp_page_gateway_fail
++        ld      a,(kcp_selected_segment)
++        call    PUT_P1_DISPATCH
++        ld      a,(RUNTIME_SCC_SLOT)
++        ld      h,0x80
++        call    CUSTOM_ENASLT
++        ; Restore SCC-I/SCC+ mode after page-2 source mapping.
++        ld      a,0x20
++        ld      (0xBFFE),a
++        ld      a,0x80
++        ld      (0xB000),a
++kcp_page_gateway_fail:
++        pop     iy
++        pop     ix
++        pop     hl
++        pop     de
++        pop     bc
++        pop     af
++        ret
++kcp_page_gateway_end:
++
+ ; Generic compressed complete page. Decode the template into the persistent
+ ; page-1 segment and the sparse overlay into a temporary allocated segment.
+ ; The latter is then exposed through page 2 while its records patch page 1.

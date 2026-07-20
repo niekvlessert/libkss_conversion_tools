@@ -1,0 +1,39 @@
+index,id,title,duration,loop,block_bytes,waves,events,dda_writes
+0,0x89,Konami,4,False,299,1,35,0
+1,0x91,Opening (From Myth to Comedy),71,False,12911,9,1660,116414
+2,0x99,Title (Parodius Dance),9,False,1803,6,204,18637
+3,0x92,Play Select,3,False,254,1,25,0
+4,0x84,Power Meter Select (Hello Paro-chan),8,True,1569,6,156,0
+5,0x80,Aerial Battle 1 (Vic Viper),20,True,3668,8,460,37599
+6,0x85,Aerial Battle 2 (Octopus),24,True,5122,8,601,40061
+7,0x86,Aerial Battle 3 (Twin Bee),24,True,4860,9,588,39652
+8,0x81,Aerial Battle 4 (Pentarou),20,True,4042,8,481,35758
+9,0x82,Stage 1-1 (Island of Pirates),44,True,9231,9,1140,75690
+10,0x87,Stage 1-2 (Crisis 4th Movement),20,True,4575,8,505,48874
+11,0x88,Stage 1 Boss,19,True,4787,4,559,44257
+12,0x8A,Stage 2-1 (Even the Patience of a Pierrot Has Limits),47,True,9122,8,1124,67967
+13,0x8B,Stage 2-2 (Chichibinta Rika),30,True,6269,6,736,78796
+14,0x8C,Stage 2 Boss (Eagle Satake),12,True,3132,3,295,18908
+15,0x8D,Stage 3 (Labyrinth),31,True,7272,7,845,67228
+16,0x8E,Stage 3 Boss (Hot Lips),28,True,5104,4,529,0
+17,0x8F,Stage 4 (Oh! Japanism),28,True,6503,8,787,67064
+18,0x90,Stage 4 Boss (Butashio),13,True,3138,4,350,26836
+19,0xA8,Stage 5 (Space Battleship Moai),22,True,5127,5,635,52690
+20,0xA9,Stage 5 Boss,20,True,4747,7,488,28468
+21,0x97,Stage 6 (Let's Get Fever with Gunkan March),43,True,9873,11,1146,71833
+22,0x98,Stage 6 Boss (Neon Core),23,True,5844,6,592,40257
+23,0x9B,Stage 7 (Beautiful Gals),47,True,9263,12,1123,55487
+24,0xAB,Stage 7 Boss,25,True,5797,6,697,55080
+25,0xA1,Stage 8 (Mottomo Kita no Kuni kara),53,True,12002,13,1427,108332
+26,0xAA,Stage 8 Boss,14,True,3125,7,352,28185
+27,0x9C,Stage 9 (Night of the Living Dead),51,True,10742,9,1110,28288
+28,0x9E,Stage 9 Boss (Yoshiwara Daiyuu),33,True,6984,11,769,44579
+29,0x9D,Stage 10 (Octopus Fortress),25,True,5756,6,679,46436
+30,0x9F,Stage 10 Boss (Golgoda Tako),9,True,2260,4,253,18077
+31,0x83,Player Out 1,5,False,698,4,59,0
+32,0xA4,Player Out 2,5,False,509,2,54,0
+33,0x95,Player Out 3,7,False,978,6,92,0
+34,0x94,Game Over,9,False,1887,4,145,0
+35,0xA0,Continue,19,True,2118,3,281,0
+36,0xA7,Ranking,22,True,2768,3,348,0
+37,0x9A,Ending,42,False,7075,3,864,40532

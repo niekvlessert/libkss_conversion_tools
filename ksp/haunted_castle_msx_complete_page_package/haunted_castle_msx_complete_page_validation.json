@@ -1,0 +1,1167 @@
+{
+  "format": "KCPX v1",
+  "output": "/mnt/data/haunted_castle_msx_complete_page.ksp",
+  "output_size": 63487,
+  "output_sha1": "3161ec5f386c4853c4120c58c899ff08183356f8",
+  "audio_sha1": "c55f468c0da6afdaa2af65a111583c0c42868bd1",
+  "page_layout": {
+    "engine": [
+      "0x4000",
+      "0x57B0"
+    ],
+    "pointer_matrix": [
+      "0x57B0",
+      "0x5954"
+    ],
+    "wrapper": [
+      "0x5960",
+      "0x5A99"
+    ],
+    "work_ram": [
+      "0x5AA0",
+      "0x5DB8"
+    ],
+    "dynamic_data": [
+      "0x5DC0",
+      "0x6F00"
+    ],
+    "shared_tail": [
+      "0x6F00",
+      "0x7FFC"
+    ],
+    "page2": "real SCC cartridge; not occupied by page image",
+    "moonsound": "I/O C4-C7; no CPU memory page"
+  },
+  "init_address": "0x5960",
+  "play_address": "0x5980",
+  "page_count": 21,
+  "template_size": 16384,
+  "overlay_total": 45665,
+  "largest_overlay": 5234,
+  "minimum_dynamic_free": 305,
+  "songs": [
+    {
+      "song": 0,
+      "command": "0x50",
+      "roots": [
+        "0x1A0A",
+        "0x1BE8",
+        "0x1D09",
+        "0x1E40",
+        "0x1F06",
+        "0x1F3C",
+        "0x1FDA",
+        "0x20C8",
+        "0x21B6",
+        "0x22E5"
+      ],
+      "primary_range": [
+        "0x1A0A",
+        "0x2340"
+      ],
+      "dynamic_end": "0x67AB",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 1877,
+      "placements": [
+        {
+          "source": "0x1955",
+          "end": "0x2340",
+          "destination": "0x5DC0",
+          "size": 2539
+        }
+      ],
+      "jump_pointers": 14,
+      "resource_pointers": 16,
+      "stream_pointers_patched": 30,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "7399b781d8f0fd1bf96a7f0f91751385927d8e96"
+    },
+    {
+      "song": 1,
+      "command": "0x51",
+      "roots": [
+        "0x2340",
+        "0x2381",
+        "0x23C2",
+        "0x23F9",
+        "0x2445",
+        "0x2446",
+        "0x247F",
+        "0x24B6",
+        "0x24ED",
+        "0x252A"
+      ],
+      "primary_range": [
+        "0x2340",
+        "0x2570"
+      ],
+      "dynamic_end": "0x5FF0",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3856,
+      "placements": [
+        {
+          "source": "0x2340",
+          "end": "0x2570",
+          "destination": "0x5DC0",
+          "size": 560
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 9,
+      "stream_pointers_patched": 9,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "fa0b3d064b19a8f653b0b41c9d0974c9d25ae484"
+    },
+    {
+      "song": 2,
+      "command": "0x52",
+      "roots": [
+        "0x2570",
+        "0x263A",
+        "0x2711",
+        "0x280F",
+        "0x2810",
+        "0x289C",
+        "0x289D",
+        "0x29DC",
+        "0x2B1B",
+        "0x2BC3"
+      ],
+      "primary_range": [
+        "0x2570",
+        "0x2CB6"
+      ],
+      "dynamic_end": "0x6506",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 2554,
+      "placements": [
+        {
+          "source": "0x2570",
+          "end": "0x2CB6",
+          "destination": "0x5DC0",
+          "size": 1862
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 24,
+      "stream_pointers_patched": 32,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "fef62f4f802ca0269dad7b0c9eb84c8204ea2d42"
+    },
+    {
+      "song": 3,
+      "command": "0x53",
+      "roots": [
+        "0x2CB6",
+        "0x2D76",
+        "0x2E34",
+        "0x2EEA",
+        "0x2EEC",
+        "0x2FA0",
+        "0x2FA2",
+        "0x3073",
+        "0x314E",
+        "0x3206"
+      ],
+      "primary_range": [
+        "0x2CB6",
+        "0x32C8"
+      ],
+      "dynamic_end": "0x63D2",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 2862,
+      "placements": [
+        {
+          "source": "0x2CB6",
+          "end": "0x32C8",
+          "destination": "0x5DC0",
+          "size": 1554
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 8,
+      "stream_pointers_patched": 16,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "3a5fb329b9b36735d7bb81609ee20cdd943d8b7e"
+    },
+    {
+      "song": 4,
+      "command": "0x54",
+      "roots": [
+        "0x32C8",
+        "0x34CD",
+        "0x3565",
+        "0x360B",
+        "0x360C",
+        "0x36B2",
+        "0x36B3",
+        "0x3898",
+        "0x3969",
+        "0x3A30"
+      ],
+      "primary_range": [
+        "0x32C8",
+        "0x3AE1"
+      ],
+      "dynamic_end": "0x65D9",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 2343,
+      "placements": [
+        {
+          "source": "0x32C8",
+          "end": "0x3AE1",
+          "destination": "0x5DC0",
+          "size": 2073
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 32,
+      "stream_pointers_patched": 40,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "4b28c142798d01b9391e5c71c855a608ce80ef28"
+    },
+    {
+      "song": 5,
+      "command": "0x55",
+      "roots": [
+        "0x47F7",
+        "0x4893",
+        "0x491E",
+        "0x49D3",
+        "0x49D5",
+        "0x4A65",
+        "0x4A66",
+        "0x4B84",
+        "0x4C1C",
+        "0x4CAE"
+      ],
+      "primary_range": [
+        "0x47F7",
+        "0x4DE0"
+      ],
+      "dynamic_end": "0x6821",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 1759,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x4DE0",
+          "destination": "0x5DC0",
+          "size": 2657
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 28,
+      "stream_pointers_patched": 36,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "b26cb7cc8e5e712c2608e153dd8050a55de8ce43"
+    },
+    {
+      "song": 6,
+      "command": "0x56",
+      "roots": [
+        "0x4DE0",
+        "0x4E28",
+        "0x4E66",
+        "0x4EA7",
+        "0x4EED",
+        "0x4F2C",
+        "0x4F2D",
+        "0x4F67",
+        "0x4FA1",
+        "0x4FEB"
+      ],
+      "primary_range": [
+        "0x4DE0",
+        "0x502D"
+      ],
+      "dynamic_end": "0x6485",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 2683,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 1144
+        },
+        {
+          "source": "0x4DE0",
+          "end": "0x502D",
+          "destination": "0x6238",
+          "size": 589
+        }
+      ],
+      "jump_pointers": 1,
+      "resource_pointers": 8,
+      "stream_pointers_patched": 9,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "e0229750a4d6ffd712ba03753c85ce0873f642e5"
+    },
+    {
+      "song": 7,
+      "command": "0x57",
+      "roots": [
+        "0x502D",
+        "0x517F",
+        "0x51E5",
+        "0x5306",
+        "0x5307",
+        "0x537A",
+        "0x537B",
+        "0x5411",
+        "0x5531",
+        "0x5627"
+      ],
+      "primary_range": [
+        "0x502D",
+        "0x5688"
+      ],
+      "dynamic_end": "0x6893",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 1645,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 1144
+        },
+        {
+          "source": "0x502D",
+          "end": "0x5688",
+          "destination": "0x6238",
+          "size": 1627
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 7,
+      "stream_pointers_patched": 15,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "8dff100012a1bbadaa10979d0f1ab2f9fac2133e"
+    },
+    {
+      "song": 8,
+      "command": "0x58",
+      "roots": [
+        "0x5688",
+        "0x5689",
+        "0x568A",
+        "0x568B",
+        "0x568C",
+        "0x568D",
+        "0x568E",
+        "0x568F",
+        "0x5690",
+        "0x5691"
+      ],
+      "primary_range": [
+        "0x5688",
+        "0x5692"
+      ],
+      "dynamic_end": "0x5DCA",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 4406,
+      "placements": [
+        {
+          "source": "0x5688",
+          "end": "0x5692",
+          "destination": "0x5DC0",
+          "size": 10
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 0,
+      "stream_pointers_patched": 0,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "930ff32b77b51d5b4bc5e7adb9de1e7ffcf0e293"
+    },
+    {
+      "song": 9,
+      "command": "0x59",
+      "roots": [
+        "0x5692",
+        "0x56B6",
+        "0x56DD",
+        "0x5706",
+        "0x572B",
+        "0x572C",
+        "0x572D",
+        "0x5762",
+        "0x5797",
+        "0x57B7"
+      ],
+      "primary_range": [
+        "0x5692",
+        "0x57F0"
+      ],
+      "dynamic_end": "0x6396",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 2922,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 1144
+        },
+        {
+          "source": "0x5692",
+          "end": "0x57F0",
+          "destination": "0x6238",
+          "size": 350
+        }
+      ],
+      "jump_pointers": 3,
+      "resource_pointers": 8,
+      "stream_pointers_patched": 11,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "8c64bb7adcee083e431eb473e436d01008f8778b"
+    },
+    {
+      "song": 10,
+      "command": "0x5A",
+      "roots": [
+        "0x57F0",
+        "0x59E2",
+        "0x5AFC",
+        "0x5D36",
+        "0x5D37",
+        "0x5DDD",
+        "0x5DDE",
+        "0x5ED1",
+        "0x5FDF",
+        "0x61CE"
+      ],
+      "primary_range": [
+        "0x57F0",
+        "0x6387"
+      ],
+      "dynamic_end": "0x6DCF",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 305,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 1144
+        },
+        {
+          "source": "0x57F0",
+          "end": "0x6387",
+          "destination": "0x6238",
+          "size": 2967
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 83,
+      "stream_pointers_patched": 91,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "7cc01bcecc03feb65f39b0c83305a3ff59ff06cb"
+    },
+    {
+      "song": 11,
+      "command": "0x5B",
+      "roots": [
+        "0x6387",
+        "0x6432",
+        "0x64F0",
+        "0x658D",
+        "0x658E",
+        "0x65FE",
+        "0x65FF",
+        "0x6698",
+        "0x672F",
+        "0x67D4"
+      ],
+      "primary_range": [
+        "0x6387",
+        "0x6B30"
+      ],
+      "dynamic_end": "0x69E1",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 1311,
+      "placements": [
+        {
+          "source": "0x437F",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 1144
+        },
+        {
+          "source": "0x6387",
+          "end": "0x6B30",
+          "destination": "0x6238",
+          "size": 1961
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 17,
+      "stream_pointers_patched": 25,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "4c2e453afb2fa2603d601e9fe97328edefaacdab"
+    },
+    {
+      "song": 12,
+      "command": "0x5C",
+      "roots": [
+        "0x3AE1",
+        "0x3B3B",
+        "0x3BBC",
+        "0x3BFD",
+        "0x3BFE",
+        "0x3C42",
+        "0x3C43",
+        "0x3C7D",
+        "0x3CB7",
+        "0x3D11"
+      ],
+      "primary_range": [
+        "0x3AE1",
+        "0x3D6B"
+      ],
+      "dynamic_end": "0x604A",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3766,
+      "placements": [
+        {
+          "source": "0x3AE1",
+          "end": "0x3D6B",
+          "destination": "0x5DC0",
+          "size": 650
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 9,
+      "stream_pointers_patched": 17,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "bb9821903f8e3c8c229acd663e3af8fea3281db0"
+    },
+    {
+      "song": 13,
+      "command": "0x5D",
+      "roots": [
+        "0x3D6B",
+        "0x3DD2",
+        "0x3EAF",
+        "0x3F75",
+        "0x3F76",
+        "0x401D",
+        "0x401E",
+        "0x408B",
+        "0x4134",
+        "0x41DD"
+      ],
+      "primary_range": [
+        "0x3D6B",
+        "0x47F7"
+      ],
+      "dynamic_end": "0x684C",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 1716,
+      "placements": [
+        {
+          "source": "0x3D6B",
+          "end": "0x47F7",
+          "destination": "0x5DC0",
+          "size": 2700
+        }
+      ],
+      "jump_pointers": 8,
+      "resource_pointers": 9,
+      "stream_pointers_patched": 17,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "3e0841510a4a8acc37f45d5420b97ac618502731"
+    },
+    {
+      "song": 14,
+      "command": "0x5E",
+      "roots": [
+        "0x6B30",
+        "0x6B5A",
+        "0x6B83",
+        "0x6BA9",
+        "0x6BA9",
+        "0x6BA9",
+        "0x6BAA",
+        "0x6BDD",
+        "0x6C16",
+        "0x6C3A"
+      ],
+      "primary_range": [
+        "0x6B30",
+        "0x6C61"
+      ],
+      "dynamic_end": "0x602C",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3796,
+      "placements": [
+        {
+          "source": "0x69F5",
+          "end": "0x6C61",
+          "destination": "0x5DC0",
+          "size": 620
+        }
+      ],
+      "jump_pointers": 2,
+      "resource_pointers": 7,
+      "stream_pointers_patched": 9,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "97e7a655fb15118f276176c001cd825fc9c3522c"
+    },
+    {
+      "song": 15,
+      "command": "0x5F",
+      "roots": [
+        "0x6C61",
+        "0x6C63",
+        "0x6C65",
+        "0x6C67",
+        "0x6C68",
+        "0x6C6A",
+        "0x6C6B",
+        "0x6C6D",
+        "0x6C6F",
+        "0x6C71"
+      ],
+      "primary_range": [
+        "0x6C61",
+        "0x6C73"
+      ],
+      "dynamic_end": "0x5DD2",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 4398,
+      "placements": [
+        {
+          "source": "0x6C61",
+          "end": "0x6C73",
+          "destination": "0x5DC0",
+          "size": 18
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 0,
+      "stream_pointers_patched": 0,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "681f0014d5ca01797c38868f83328e14a515de6b"
+    },
+    {
+      "song": 16,
+      "command": "0x60",
+      "roots": [
+        "0x6C73",
+        "0x6C75",
+        "0x6C77",
+        "0x6C79",
+        "0x6C7A",
+        "0x6C7C",
+        "0x6C7D",
+        "0x6C7F",
+        "0x6C81",
+        "0x6C83"
+      ],
+      "primary_range": [
+        "0x6C73",
+        "0x6C85"
+      ],
+      "dynamic_end": "0x5DD2",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 4398,
+      "placements": [
+        {
+          "source": "0x6C73",
+          "end": "0x6C85",
+          "destination": "0x5DC0",
+          "size": 18
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 0,
+      "stream_pointers_patched": 0,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "a559de861f37648a356364ad1ff8911b6fcba521"
+    },
+    {
+      "song": 17,
+      "command": "0x61",
+      "roots": [
+        "0x6C85",
+        "0x6C9F",
+        "0x6CB9",
+        "0x6CE6",
+        "0x6CE7",
+        "0x6CE8",
+        "0x6CE9",
+        "0x6CFF",
+        "0x6D15",
+        "0x6D42"
+      ],
+      "primary_range": [
+        "0x6C85",
+        "0x6D5A"
+      ],
+      "dynamic_end": "0x5FD0",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3888,
+      "placements": [
+        {
+          "source": "0x69F5",
+          "end": "0x6B30",
+          "destination": "0x5DC0",
+          "size": 315
+        },
+        {
+          "source": "0x6C85",
+          "end": "0x6D5A",
+          "destination": "0x5EFB",
+          "size": 213
+        }
+      ],
+      "jump_pointers": 2,
+      "resource_pointers": 7,
+      "stream_pointers_patched": 9,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "325fcf7f5a808591424e07938cf9a9de6607d92a"
+    },
+    {
+      "song": 18,
+      "command": "0x62",
+      "roots": [
+        "0x6D5A",
+        "0x6D7C",
+        "0x6D92",
+        "0x6DA8",
+        "0x6DA8",
+        "0x6DA8",
+        "0x6DA9",
+        "0x6DCB",
+        "0x6DED",
+        "0x6E03"
+      ],
+      "primary_range": [
+        "0x6D5A",
+        "0x6E17"
+      ],
+      "dynamic_end": "0x5FB8",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3912,
+      "placements": [
+        {
+          "source": "0x69F5",
+          "end": "0x6B30",
+          "destination": "0x5DC0",
+          "size": 315
+        },
+        {
+          "source": "0x6D5A",
+          "end": "0x6E17",
+          "destination": "0x5EFB",
+          "size": 189
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 7,
+      "stream_pointers_patched": 7,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "427058a82a91eb829fbe6e126ece04abb0b863a2"
+    },
+    {
+      "song": 19,
+      "command": "0x63",
+      "roots": [
+        "0x6E17",
+        "0x6E2F",
+        "0x6E58",
+        "0x6E6F",
+        "0x6E88",
+        "0x6E88",
+        "0x6E89",
+        "0x6E9C",
+        "0x6EAF",
+        "0x6EDC"
+      ],
+      "primary_range": [
+        "0x6E17",
+        "0x8000"
+      ],
+      "dynamic_end": "0x5FE8",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 3864,
+      "placements": [
+        {
+          "source": "0x69F5",
+          "end": "0x6B30",
+          "destination": "0x5DC0",
+          "size": 315
+        },
+        {
+          "source": "0x6E17",
+          "end": "0x6F04",
+          "destination": "0x5EFB",
+          "size": 237
+        }
+      ],
+      "jump_pointers": 2,
+      "resource_pointers": 8,
+      "stream_pointers_patched": 10,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "537a9c63927dee70549a1b8e5aca840d685151e9"
+    },
+    {
+      "song": 20,
+      "command": "0x64",
+      "roots": [
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954",
+        "0x1954"
+      ],
+      "primary_range": [
+        "0x1954",
+        "0x1A0A"
+      ],
+      "dynamic_end": "0x5E76",
+      "dynamic_capacity_end": "0x6F00",
+      "dynamic_free": 4234,
+      "placements": [
+        {
+          "source": "0x1954",
+          "end": "0x1A0A",
+          "destination": "0x5DC0",
+          "size": 182
+        }
+      ],
+      "jump_pointers": 0,
+      "resource_pointers": 0,
+      "stream_pointers_patched": 0,
+      "core_patches": {
+        "instruction_operands": 414,
+        "indirect_code_words": 36
+      },
+      "wrapper_address_patches": {
+        "02FD->42FD": 1,
+        "003C->403C": 1,
+        "0476->4476": 1,
+        "0F06->4F06": 1,
+        "8315->5DB5": 3,
+        "8316->5DB6": 3,
+        "8317->5DB7": 3
+      },
+      "init": "0x5960",
+      "play": "0x5980",
+      "stop": "0x5984",
+      "page_sha1": "93bf0689e9000aaf6ac29941db068dcdcaff6863"
+    }
+  ],
+  "limitations": [
+    "K007232 accesses still use the virtual D0/D1 gateway; the current MSX player needs an OPL4 PCM translator for those ports.",
+    "This build is statically relocation-validated and KCPX reconstruction-validated; audio output still requires an OpenMSX or real-MSX playback test."
+  ]
+}

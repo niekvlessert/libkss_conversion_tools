@@ -1,0 +1,196 @@
+{
+  "ok": true,
+  "tracks": 19,
+  "pages": 35,
+  "total_steps": 4024026,
+  "max_steps": 554819,
+  "results": [
+    {
+      "track": 0,
+      "frames": 5580,
+      "steps": 332651,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        1,
+        0
+      ]
+    },
+    {
+      "track": 1,
+      "frames": 3780,
+      "steps": 236153,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        3,
+        2
+      ]
+    },
+    {
+      "track": 2,
+      "frames": 1680,
+      "steps": 112663,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": []
+    },
+    {
+      "track": 3,
+      "frames": 4620,
+      "steps": 259272,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        6,
+        5
+      ]
+    },
+    {
+      "track": 4,
+      "frames": 9780,
+      "steps": 554819,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": [
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "track": 5,
+      "frames": 480,
+      "steps": 24580,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    },
+    {
+      "track": 6,
+      "frames": 840,
+      "steps": 48039,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": []
+    },
+    {
+      "track": 7,
+      "frames": 2700,
+      "steps": 147215,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    },
+    {
+      "track": 8,
+      "frames": 3840,
+      "steps": 232814,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        15,
+        14
+      ]
+    },
+    {
+      "track": 9,
+      "frames": 480,
+      "steps": 20168,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    },
+    {
+      "track": 10,
+      "frames": 7380,
+      "steps": 440713,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        18,
+        19,
+        17
+      ]
+    },
+    {
+      "track": 11,
+      "frames": 4560,
+      "steps": 248067,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        21,
+        20
+      ]
+    },
+    {
+      "track": 12,
+      "frames": 9300,
+      "steps": 379509,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": [
+        23,
+        24
+      ]
+    },
+    {
+      "track": 13,
+      "frames": 540,
+      "steps": 18315,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    },
+    {
+      "track": 14,
+      "frames": 3960,
+      "steps": 244872,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        27,
+        26
+      ]
+    },
+    {
+      "track": 15,
+      "frames": 3420,
+      "steps": 185543,
+      "ended": 0,
+      "loop": true,
+      "pages_seen": [
+        29,
+        28
+      ]
+    },
+    {
+      "track": 16,
+      "frames": 6960,
+      "steps": 406070,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": [
+        31,
+        32
+      ]
+    },
+    {
+      "track": 17,
+      "frames": 240,
+      "steps": 5862,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    },
+    {
+      "track": 18,
+      "frames": 2460,
+      "steps": 126701,
+      "ended": 1,
+      "loop": false,
+      "pages_seen": []
+    }
+  ]
+}

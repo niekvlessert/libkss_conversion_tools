@@ -1,0 +1,406 @@
+{
+  "name": "Magical Chase",
+  "container": "KCPZ",
+  "kcpz_version": 2,
+  "compression": "optimal ZX0 v2 per stream",
+  "source_file": "Magical_Chase_PC_Engine_SCCplus_chunked_prototype.ksp",
+  "source_bytes": 354452,
+  "source_sha256": "6de7b1db0dbe8a2d6bc19ccd582e1a79c6992e3a731cdf83af7fb5f087e1b1c4",
+  "output_file": "Magical_Chase_PC_Engine_SCCplus_chunked_compressed.ksp",
+  "output_bytes": 101790,
+  "output_sha256": "4e61f48f8918dd3116a430a81159bd0aa33c135525d8e1fd16219e5cd87e0a12",
+  "reduction_bytes": 252662,
+  "reduction_percent": 71.28,
+  "public_tracks": 19,
+  "internal_pages": 35,
+  "template_raw_bytes": 16384,
+  "template_packed_bytes": 318,
+  "all_streams_roundtrip_exact": true,
+  "all_materialized_pages_byte_identical_to_kcpx": true,
+  "pages": [
+    {
+      "page": 0,
+      "raw_overlay_bytes": 14338,
+      "packed_overlay_bytes": 4200,
+      "page_sha256": "7f6768ba62471c58ac6c6d1eeb25c6a8c9592fe35e1be10dda1eacc78093b556"
+    },
+    {
+      "page": 1,
+      "raw_overlay_bytes": 14058,
+      "packed_overlay_bytes": 4364,
+      "page_sha256": "f5fdb2220ba45b6ad52545403699e7dd060e1688d8fea32d9fe385b1547f0626"
+    },
+    {
+      "page": 2,
+      "raw_overlay_bytes": 14326,
+      "packed_overlay_bytes": 3011,
+      "page_sha256": "5ac7850234ed38ae19a2e1f7cd9c8d438c9ca894423bad7d70a5ddaad65114c1"
+    },
+    {
+      "page": 3,
+      "raw_overlay_bytes": 6909,
+      "packed_overlay_bytes": 1686,
+      "page_sha256": "833b078880c198b0807dc746cae392bd4dc052201263ab95814013590db448d8"
+    },
+    {
+      "page": 4,
+      "raw_overlay_bytes": 10576,
+      "packed_overlay_bytes": 3319,
+      "page_sha256": "eb6067bbc9771b63a88d5f844b20c1ffcfcb2f2e8e5dc1257c1c0794f8ced6ab"
+    },
+    {
+      "page": 5,
+      "raw_overlay_bytes": 14337,
+      "packed_overlay_bytes": 3979,
+      "page_sha256": "5fe6333b31f460dd4dc6e94cf4e1fce17029e22a327af194bd4c1a0be16f6f78"
+    },
+    {
+      "page": 6,
+      "raw_overlay_bytes": 7055,
+      "packed_overlay_bytes": 1826,
+      "page_sha256": "12043ef9f0280912f1dea5d99ab673d0f1a0f2ef6829b833b8f3a2c1cc2b5dfe"
+    },
+    {
+      "page": 7,
+      "raw_overlay_bytes": 14333,
+      "packed_overlay_bytes": 3767,
+      "page_sha256": "79be05c10903f5c73856aea08340fbebb2b0a83d81e8febcb8f248793c1f07f7"
+    },
+    {
+      "page": 8,
+      "raw_overlay_bytes": 14335,
+      "packed_overlay_bytes": 4826,
+      "page_sha256": "7b3cfcf56112b29347f6c794c9bd2ea74fcb3655c90d073ad82bd8371d99fe94"
+    },
+    {
+      "page": 9,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4937,
+      "page_sha256": "dac85ee3411f26417a30accf71f35be7c68e7c1f20c2cf71f481b308c73d0af2"
+    },
+    {
+      "page": 10,
+      "raw_overlay_bytes": 5748,
+      "packed_overlay_bytes": 2293,
+      "page_sha256": "721ce5475fc932f7fc7fcc911adc24346e9e40ff508abad064a8b5fee35345e6"
+    },
+    {
+      "page": 11,
+      "raw_overlay_bytes": 2181,
+      "packed_overlay_bytes": 996,
+      "page_sha256": "8a62af1d18a177c36960ab4817abde755aac73538aaed3968582c3f444760fdc"
+    },
+    {
+      "page": 12,
+      "raw_overlay_bytes": 3636,
+      "packed_overlay_bytes": 756,
+      "page_sha256": "eeb953bb364550494100bf9e0245bcf69af6fa0f140d4438317dc40ae3420e85"
+    },
+    {
+      "page": 13,
+      "raw_overlay_bytes": 12269,
+      "packed_overlay_bytes": 2357,
+      "page_sha256": "4ff18a94d98df2bc0bf8d8f6b65328c03368a55b4905f83bb729c3d6f5ab921d"
+    },
+    {
+      "page": 14,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4194,
+      "page_sha256": "d649560b8d363554decaca501677d3f9dced5a0879e9c39745fea210943f5ef2"
+    },
+    {
+      "page": 15,
+      "raw_overlay_bytes": 4043,
+      "packed_overlay_bytes": 1392,
+      "page_sha256": "6350b08a8f46fb873673ad56b31e5b49d8c459d470b368725b3d01711a17965c"
+    },
+    {
+      "page": 16,
+      "raw_overlay_bytes": 1422,
+      "packed_overlay_bytes": 458,
+      "page_sha256": "e7469cf5dc959a28c6b61f7de8571fdc84566a2505635e3911cf0fd00f34bba2"
+    },
+    {
+      "page": 17,
+      "raw_overlay_bytes": 14334,
+      "packed_overlay_bytes": 4797,
+      "page_sha256": "bcb533a4bd5b140a6be2ae1c795690f7703892b392211dba7e2d2a94f78a6237"
+    },
+    {
+      "page": 18,
+      "raw_overlay_bytes": 14335,
+      "packed_overlay_bytes": 4881,
+      "page_sha256": "5d849845096ea60da7ed23cb17687a9689e7e4bc2b43a3bb2b79cb84bbc2d9a2"
+    },
+    {
+      "page": 19,
+      "raw_overlay_bytes": 8811,
+      "packed_overlay_bytes": 2183,
+      "page_sha256": "8f664c75fd327acc1612144d53f86c1ef9fb2e488c8ecbda25086c5cbacfe6c3"
+    },
+    {
+      "page": 20,
+      "raw_overlay_bytes": 14336,
+      "packed_overlay_bytes": 3752,
+      "page_sha256": "a1fe9220f0960220ae5e9db04a5818722dd26131faf63f7c7c1bfc7bc3866013"
+    },
+    {
+      "page": 21,
+      "raw_overlay_bytes": 4241,
+      "packed_overlay_bytes": 1778,
+      "page_sha256": "3e77bba1da4ddadc167347d0df35de0fb5b7ea639e85a8de3194f1edb189cfda"
+    },
+    {
+      "page": 22,
+      "raw_overlay_bytes": 14329,
+      "packed_overlay_bytes": 5349,
+      "page_sha256": "94fd26a080fe1a3f43368d617af84ccf0931b34d385e1f17e695f08cae3e9e98"
+    },
+    {
+      "page": 23,
+      "raw_overlay_bytes": 14336,
+      "packed_overlay_bytes": 3618,
+      "page_sha256": "79d8f17de23321c305ff00e125b892899bd1c50d7c2f8b84d5db2e9c77287af4"
+    },
+    {
+      "page": 24,
+      "raw_overlay_bytes": 1457,
+      "packed_overlay_bytes": 657,
+      "page_sha256": "1779c82255c8fa37d90d236958456b0eac5d53f7afc76774db47f9e3588c4028"
+    },
+    {
+      "page": 25,
+      "raw_overlay_bytes": 1489,
+      "packed_overlay_bytes": 771,
+      "page_sha256": "6c7460e5ec76c11fc3e3dcd10ed636e26c944acee0bf9777fda884f22cca5975"
+    },
+    {
+      "page": 26,
+      "raw_overlay_bytes": 14336,
+      "packed_overlay_bytes": 2511,
+      "page_sha256": "fbb64d6022cfe5cb696616bc33f317a21ad534818748c98b02cd593bee37f225"
+    },
+    {
+      "page": 27,
+      "raw_overlay_bytes": 6695,
+      "packed_overlay_bytes": 1863,
+      "page_sha256": "a71ffb078bbc3fbf8971b1dfe6be92e02aa2912c224e00166060909dd2b518e5"
+    },
+    {
+      "page": 28,
+      "raw_overlay_bytes": 14333,
+      "packed_overlay_bytes": 4013,
+      "page_sha256": "7841f3a77c69301e7154b4d6c639df25733b745003a6ed2904329d07e9549649"
+    },
+    {
+      "page": 29,
+      "raw_overlay_bytes": 357,
+      "packed_overlay_bytes": 267,
+      "page_sha256": "c6f37cd0347fafa55cad311d14d64b2d714ec98e57894e096c115efe57918fcd"
+    },
+    {
+      "page": 30,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4185,
+      "page_sha256": "b103a177245801e7d465007d1b656638004bb110a62106af136c726c4b5fc606"
+    },
+    {
+      "page": 31,
+      "raw_overlay_bytes": 14333,
+      "packed_overlay_bytes": 5304,
+      "page_sha256": "9b1110deeb08d6e040b359c5f7c7ec115172ff043806f0288a20fe6ae3f77e91"
+    },
+    {
+      "page": 32,
+      "raw_overlay_bytes": 5941,
+      "packed_overlay_bytes": 1884,
+      "page_sha256": "940e0ac151e098de82df51560637ee10bca16638f09bf3300388467fa48b275b"
+    },
+    {
+      "page": 33,
+      "raw_overlay_bytes": 480,
+      "packed_overlay_bytes": 336,
+      "page_sha256": "36a819a3a16c46e7b5a72a504965f9fd95d6e7be405ccd4ed04662b38b01ebc6"
+    },
+    {
+      "page": 34,
+      "raw_overlay_bytes": 10708,
+      "packed_overlay_bytes": 4117,
+      "page_sha256": "c429da1284c2b9e8a4ebf52544771b7971b3a4db85a33ca6a5540b7eca06cbeb"
+    }
+  ],
+  "sparse_chunk_staging": "First descriptor packed-size is deliberately expanded to cover every contiguous compressed chunk of that public track; each span fits in at most two 16K file segments.",
+  "track_staging_spans": [
+    {
+      "public_track": 0,
+      "title": "Azure Way",
+      "first_page": 0,
+      "page_count": 2,
+      "staged_packed_span": 8564,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 1,
+      "title": "Akuma ga Kitarite Utautau",
+      "first_page": 2,
+      "page_count": 2,
+      "staged_packed_span": 4697,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 2,
+      "title": "Gizmo Dancing",
+      "first_page": 4,
+      "page_count": 1,
+      "staged_packed_span": 3319,
+      "first_file_segment": 0,
+      "last_file_segment": 1
+    },
+    {
+      "public_track": 3,
+      "title": "Debug ja nai yo",
+      "first_page": 5,
+      "page_count": 2,
+      "staged_packed_span": 5805,
+      "first_file_segment": 1,
+      "last_file_segment": 1
+    },
+    {
+      "public_track": 4,
+      "title": "Kouri ja nai no yo!",
+      "first_page": 7,
+      "page_count": 4,
+      "staged_packed_span": 15823,
+      "first_file_segment": 1,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 5,
+      "title": "Hyuu Hyuu",
+      "first_page": 11,
+      "page_count": 1,
+      "staged_packed_span": 996,
+      "first_file_segment": 2,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 6,
+      "title": "Gizmo March",
+      "first_page": 12,
+      "page_count": 1,
+      "staged_packed_span": 756,
+      "first_file_segment": 2,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 7,
+      "title": "Uncle Pumpkin",
+      "first_page": 13,
+      "page_count": 1,
+      "staged_packed_span": 2357,
+      "first_file_segment": 2,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 8,
+      "title": "Rampish Chase",
+      "first_page": 14,
+      "page_count": 2,
+      "staged_packed_span": 5586,
+      "first_file_segment": 2,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 9,
+      "title": "Aah Yokatta...! 1",
+      "first_page": 16,
+      "page_count": 1,
+      "staged_packed_span": 458,
+      "first_file_segment": 2,
+      "last_file_segment": 3
+    },
+    {
+      "public_track": 10,
+      "title": "Ra Ichizoku no Senritsu ni Yoru Hensoukyoku",
+      "first_page": 17,
+      "page_count": 3,
+      "staged_packed_span": 11861,
+      "first_file_segment": 3,
+      "last_file_segment": 3
+    },
+    {
+      "public_track": 11,
+      "title": "Meisou no Waltz 1",
+      "first_page": 20,
+      "page_count": 2,
+      "staged_packed_span": 5530,
+      "first_file_segment": 3,
+      "last_file_segment": 4
+    },
+    {
+      "public_track": 12,
+      "title": "Meisou no Waltz 2",
+      "first_page": 22,
+      "page_count": 3,
+      "staged_packed_span": 9624,
+      "first_file_segment": 4,
+      "last_file_segment": 4
+    },
+    {
+      "public_track": 13,
+      "title": "Aah Yokatta...! 2",
+      "first_page": 25,
+      "page_count": 1,
+      "staged_packed_span": 771,
+      "first_file_segment": 4,
+      "last_file_segment": 4
+    },
+    {
+      "public_track": 14,
+      "title": "Termination",
+      "first_page": 26,
+      "page_count": 2,
+      "staged_packed_span": 4374,
+      "first_file_segment": 4,
+      "last_file_segment": 4
+    },
+    {
+      "public_track": 15,
+      "title": "Ripple no Theme 1",
+      "first_page": 28,
+      "page_count": 2,
+      "staged_packed_span": 4280,
+      "first_file_segment": 4,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 16,
+      "title": "Ripple no Theme 2",
+      "first_page": 30,
+      "page_count": 3,
+      "staged_packed_span": 11373,
+      "first_file_segment": 5,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 17,
+      "title": "Awakening",
+      "first_page": 33,
+      "page_count": 1,
+      "staged_packed_span": 336,
+      "first_file_segment": 5,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 18,
+      "title": "Ochitsuki ga nai wa yo!",
+      "first_page": 34,
+      "page_count": 1,
+      "staged_packed_span": 4117,
+      "first_file_segment": 5,
+      "last_file_segment": 6
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "origin": "0x4000",
+  "size": 567,
+  "labels": {
+    "init": "0x4000",
+    "init_done": "0x403d",
+    "play": "0x403e",
+    "apply_event": "0x404e",
+    "wave0_done": "0x407f",
+    "wave1_done": "0x409e",
+    "wave2_done": "0x40bd",
+    "wave3_done": "0x40dc",
+    "wave4_done": "0x40fb",
+    "freq0_done": "0x410e",
+    "freq1_done": "0x4121",
+    "freq2_done": "0x4134",
+    "freq3_done": "0x4147",
+    "freq4_done": "0x415a",
+    "psgf_done": "0x4173",
+    "noise_f_done": "0x4183",
+    "vol0_done": "0x4191",
+    "vol1_done": "0x419f",
+    "vol2_done": "0x41ad",
+    "vol3_done": "0x41bb",
+    "vol4_done": "0x41c9",
+    "psgv_done": "0x41d9",
+    "noise_v_done": "0x41e9",
+    "stream_end": "0x41f6",
+    "final_end": "0x420b",
+    "silence": "0x4214",
+    "sil_loop": "0x421a"
+  }
+}

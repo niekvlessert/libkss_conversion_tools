@@ -1,0 +1,33 @@
+public_track,id,title,duration,loop,first_page,page_count,block_bytes,waves,events,dda_writes
+0,0x6A,Opening Theme,36,False,0,1,5626,5,675,0
+1,0x6B,Title Theme,23,False,1,1,5976,12,597,0
+2,0x7F,Password Entry,21,False,2,1,3592,3,420,0
+3,0x6C,Area Select,34,False,3,1,8312,7,752,0
+4,0x6E,Stage Select,16,False,4,1,3916,1,314,0
+5,0x6F,Area 1: Jammin' Jungle,129,False,5,3,33074,10,3553,0
+6,0x75,Stage Clear,3,False,8,1,1100,3,103,0
+7,0x79,"Boss Theme 1 (Areas 1, 3, 4, 5)",88,False,9,3,30926,6,3035,0
+8,0x70,Area 2: Vexin' Volcano,145,False,12,3,34122,6,3442,0
+9,0x78,Boss Theme 2 (Area 2),84,False,15,2,21696,8,2234,0
+10,0x71,Area 3: Slammin' Sea,165,False,17,3,39233,12,4328,0
+11,0x72,Area 4: Crankin' Castle,174,False,20,2,25456,6,3140,0
+12,0x73,Area 5: Thrashin' Tundra,183,False,22,4,47507,12,5334,0
+13,0x6D,Final Area Intro,21,False,26,1,4765,4,488,0
+14,0x74,Final Area,114,False,27,3,29816,8,3144,0
+15,0x88,Final Boss (Part 1 Intro),7,False,30,1,450,3,36,0
+16,0x7B,Final Boss (Part 1),77,False,31,2,14571,5,1759,0
+17,0x89,Final Boss (Part 2 Intro),5,False,33,1,141,1,11,0
+18,0x7C,Final Boss (Part 2),87,False,34,2,17921,7,1978,0
+19,0x7A,Final Boss (Part 3 Intro),7,False,36,1,757,1,77,0
+20,0x7D,Final Boss (Part 3),46,False,37,2,14792,3,1515,0
+21,0x7E,Game Clear,9,False,39,1,1662,4,160,0
+22,0x76,Player Death,2,False,40,1,546,3,40,0
+23,0x87,Staff Roll,90,False,41,2,27653,8,2997,0
+24,0x77,Game Over,13,False,43,1,2089,4,270,0
+25,0x80,Battle Configuration,43,False,44,1,8281,2,985,0
+26,0x81,Battle Start,3,False,45,1,830,1,61,0
+27,0x82,Battle Theme,159,False,46,4,47286,8,4992,0
+28,0x83,Battle Win,3,False,50,1,877,3,86,0
+29,0x84,Battle Draw,10,False,51,1,2384,6,242,0
+30,0x85,Battle Victory,27,False,52,1,6010,4,720,0
+31,0x86,Unknown Fanfare,1,False,53,1,226,1,19,0

@@ -1,0 +1,274 @@
+{
+  "ok": true,
+  "tracks": 38,
+  "total_steps": 2478722,
+  "max_steps": 182328,
+  "results": [
+    {
+      "track": 0,
+      "frames": 240,
+      "steps": 4532,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 1,
+      "frames": 4260,
+      "steps": 182328,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 2,
+      "frames": 540,
+      "steps": 22467,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 3,
+      "frames": 180,
+      "steps": 3395,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 4,
+      "frames": 480,
+      "steps": 18874,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 5,
+      "frames": 1200,
+      "steps": 50774,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 6,
+      "frames": 1440,
+      "steps": 66192,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 7,
+      "frames": 1440,
+      "steps": 64494,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 8,
+      "frames": 1200,
+      "steps": 53271,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 9,
+      "frames": 2640,
+      "steps": 124005,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 10,
+      "frames": 1200,
+      "steps": 57027,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 11,
+      "frames": 1140,
+      "steps": 60590,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 12,
+      "frames": 2820,
+      "steps": 123551,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 13,
+      "frames": 1800,
+      "steps": 81713,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 14,
+      "frames": 720,
+      "steps": 35128,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 15,
+      "frames": 1860,
+      "steps": 92568,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 16,
+      "frames": 1680,
+      "steps": 63789,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 17,
+      "frames": 1680,
+      "steps": 84894,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 18,
+      "frames": 780,
+      "steps": 39102,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 19,
+      "frames": 1320,
+      "steps": 67999,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 20,
+      "frames": 1200,
+      "steps": 56015,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 21,
+      "frames": 2580,
+      "steps": 126030,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 22,
+      "frames": 1380,
+      "steps": 68142,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 23,
+      "frames": 2820,
+      "steps": 124059,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 24,
+      "frames": 1500,
+      "steps": 75114,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 25,
+      "frames": 3180,
+      "steps": 155936,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 26,
+      "frames": 840,
+      "steps": 39165,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 27,
+      "frames": 3060,
+      "steps": 130272,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 28,
+      "frames": 1980,
+      "steps": 87546,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 29,
+      "frames": 1500,
+      "steps": 74051,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 30,
+      "frames": 540,
+      "steps": 28020,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 31,
+      "frames": 300,
+      "steps": 7537,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 32,
+      "frames": 300,
+      "steps": 6693,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 33,
+      "frames": 420,
+      "steps": 11339,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 34,
+      "frames": 540,
+      "steps": 19399,
+      "ended": 1,
+      "loop": false
+    },
+    {
+      "track": 35,
+      "frames": 1140,
+      "steps": 33739,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 36,
+      "frames": 1320,
+      "steps": 41477,
+      "ended": 0,
+      "loop": true
+    },
+    {
+      "track": 37,
+      "frames": 2520,
+      "steps": 97495,
+      "ended": 1,
+      "loop": false
+    }
+  ]
+}

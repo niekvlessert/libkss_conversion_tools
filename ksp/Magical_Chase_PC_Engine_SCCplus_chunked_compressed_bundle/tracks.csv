@@ -1,0 +1,20 @@
+public_track,id,title,duration,loop,first_page,page_count,block_bytes,waves,events,dda_writes
+0,0x05,Azure Way,93,True,0,2,28051,10,3004,0
+1,0x0B,Akuma ga Kitarite Utautau,63,True,2,2,21082,4,2081,0
+2,0x0A,Gizmo Dancing,28,True,4,1,10572,5,971,0
+3,0x04,Debug ja nai yo,77,True,5,2,21207,5,2344,0
+4,0x06,Kouri ja nai no yo!,163,False,7,4,48209,5,4887,0
+5,0x0D,Hyuu Hyuu,8,False,11,1,2177,3,217,0
+6,0x02,Gizmo March,14,True,12,1,3632,1,448,0
+7,0x09,Uncle Pumpkin,45,False,13,1,12265,3,1316,0
+8,0x03,Rampish Chase,64,True,14,2,18166,6,2170,0
+9,0x0E,Aah Yokatta...! 1,8,False,16,1,1418,2,189,0
+10,0x08,Ra Ichizoku no Senritsu ni Yoru Hensoukyoku,123,True,17,3,37050,6,3973,0
+11,0x12,Meisou no Waltz 1,76,True,20,2,18264,9,2342,0
+12,0x07,Meisou no Waltz 2,155,False,22,3,29500,9,3155,0
+13,0x0F,Aah Yokatta...! 2,9,False,25,1,1485,2,146,0
+14,0x0C,Termination,66,True,26,2,20782,7,2180,0
+15,0x10,Ripple no Theme 1,57,True,28,2,14473,6,1701,0
+16,0x11,Ripple no Theme 2,116,False,30,3,33928,10,3671,0
+17,0x01,Awakening,4,False,33,1,476,2,46,0
+18,0x00,Ochitsuki ga nai wa yo!,41,False,34,1,10704,7,1126,0

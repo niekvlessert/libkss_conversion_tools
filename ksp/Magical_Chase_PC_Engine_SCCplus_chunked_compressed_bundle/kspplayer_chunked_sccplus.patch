@@ -1,0 +1,81 @@
+--- a/msx/PLAYER_LAYOUT.inc
++++ b/msx/PLAYER_LAYOUT.inc
+@@
+ CUSTOM_ENASLT: equ 0xD840
++; Runtime-only KCP overlay switch gateway used by chunked HuC6280/SCC+ packs.
++; A = internal KCP page index. The routine replaces only sparse overlay
++; records; it does not recopy the common 16K template.
++KCP_PAGE_GATEWAY: equ 0xD8A0
+@@
+--- a/msx/KSPPLAYER.asm
++++ b/msx/KSPPLAYER.asm
+@@
+ kcpx_runtime_path:
+@@
+         call    kcpx_materialize_dispatch
+         jp      c,format_error
++
++        ; Install the fixed page-3 gateway called by chunk-aware engines.
++        ld      hl,kcpx_page_gateway
++        ld      de,KCP_PAGE_GATEWAY
++        ld      bc,kcpx_page_gateway_end-kcpx_page_gateway
++        ldir
+@@
+ kcpx_silence:
+@@
+         ld      a,0x3F
+         ld      (0x9000),a
++        ; Silence SCC-I/SCC+ register mode as well.
++        xor     a
++        ld      hl,0xB8AA
++        ld      b,6
++kcpx_silence_sccplus:
++        ld      (hl),a
++        inc     hl
++        djnz    kcpx_silence_sccplus
+         xor     a
+         ld      hl,0x9880
+@@
++; Copy only the selected KCPX sparse overlay. The common template and engine
++; state at 4000H-47FFH remain intact while 4800H-7FFFH is replaced.
++kcpx_materialize_overlay_only:
++        ld      a,(RUNTIME_KSS_TABLE)
++        ld      (kcp_selected_segment),a
++        ld      (kcp_dest_segment),a
++        ld      hl,(kcp_records_source)
++        ld      (kcp_cursor),hl
++        ld      a,(kcp_selected_page)
++        ld      (kcp_page_index),a
++        jp      kcpx_overlay_scan
++
++; This block is copied to KCP_PAGE_GATEWAY (D8A0H). A contains the internal
++; logical page. It is called with interrupts disabled from the page-1 engine.
++kcpx_page_gateway:
++        push    af
++        push    bc
++        push    de
++        push    hl
++        push    ix
++        push    iy
++        ld      (kcp_selected_page),a
++        call    kcpx_materialize_overlay_only
++        jr      c,kcpx_page_gateway_fail
++        ld      a,(kcp_selected_segment)
++        call    PUT_P1_DISPATCH
++        ld      a,(RUNTIME_SCC_SLOT)
++        ld      h,0x80
++        call    CUSTOM_ENASLT
++        ; Restore SCC-I/SCC+ mode after page-2 source mapping.
++        ld      a,0x20
++        ld      (0xBFFE),a
++        ld      a,0x80
++        ld      (0xB000),a
++kcpx_page_gateway_fail:
++        pop     iy
++        pop     ix
++        pop     hl
++        pop     de
++        pop     bc
++        pop     af
++        ret
++kcpx_page_gateway_end:

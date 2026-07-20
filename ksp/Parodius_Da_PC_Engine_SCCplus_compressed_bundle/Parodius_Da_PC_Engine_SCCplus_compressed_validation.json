@@ -1,0 +1,249 @@
+{
+  "name": "Parodius Da!",
+  "source": "Parodius_Da_PC_Engine_SCCplus_prototype.ksp",
+  "source_bytes": 208387,
+  "source_sha256": "bfdf998ff865cab5db0d9717811eeba94969b05cff6dbd1892c0e6d04bc8a2e6",
+  "output": "Parodius_Da_PC_Engine_SCCplus_compressed.ksp",
+  "output_bytes": 68348,
+  "output_sha256": "c4f123c0054b4b4ea7c54df2995236e019c151406624f636e8ce03480064144d",
+  "reduction_bytes": 140039,
+  "reduction_percent": 67.2,
+  "container": "KCPZ",
+  "kcpz_version": 1,
+  "public_tracks": 38,
+  "internal_pages": 38,
+  "template_raw_bytes": 16384,
+  "template_packed_bytes": 294,
+  "all_streams_roundtrip_exact": true,
+  "all_materialized_pages_byte_identical_to_kcpx": true,
+  "pages": [
+    {
+      "page": 0,
+      "raw_overlay_bytes": 303,
+      "packed_overlay_bytes": 218,
+      "page_sha256": "52015a5afbc42576f1e81eaaf844b1fc2e6fc53d4958f74370eeb462360ba5ce"
+    },
+    {
+      "page": 1,
+      "raw_overlay_bytes": 12915,
+      "packed_overlay_bytes": 4195,
+      "page_sha256": "f461995a4c818580327a30f32b3437585714652ac7dde29528d859a65913baee"
+    },
+    {
+      "page": 2,
+      "raw_overlay_bytes": 1807,
+      "packed_overlay_bytes": 779,
+      "page_sha256": "bc6ab7a37ea0f8795c75ffcef55f271333e026f76afe35a8094c1e87961b3e80"
+    },
+    {
+      "page": 3,
+      "raw_overlay_bytes": 258,
+      "packed_overlay_bytes": 201,
+      "page_sha256": "8e832bb8bd81b8e711fd5f0ddde93869a52dbd6133bb4cfd6f7ab859f8cbb6f0"
+    },
+    {
+      "page": 4,
+      "raw_overlay_bytes": 1573,
+      "packed_overlay_bytes": 798,
+      "page_sha256": "25719a92a3b7a8608dc6cddde810d84ee7368a7aae42de986afc21740a4c4b84"
+    },
+    {
+      "page": 5,
+      "raw_overlay_bytes": 3672,
+      "packed_overlay_bytes": 1495,
+      "page_sha256": "40004ff4ea9c747d3808776213f724b5bd6caf94aa936667612c5cd1a5764393"
+    },
+    {
+      "page": 6,
+      "raw_overlay_bytes": 5126,
+      "packed_overlay_bytes": 2210,
+      "page_sha256": "a1c325123173741bf2033ab1eabc50cb2b652c314c35e35061aef2991ffcb18c"
+    },
+    {
+      "page": 7,
+      "raw_overlay_bytes": 4864,
+      "packed_overlay_bytes": 1993,
+      "page_sha256": "235158611781744de4a82fd8ee9227848e04b95e6d3523051781ffc42b2a34d1"
+    },
+    {
+      "page": 8,
+      "raw_overlay_bytes": 4046,
+      "packed_overlay_bytes": 1687,
+      "page_sha256": "3423cc5f5ff1c28f58842706076dc7e21929ae49f821d4bf16d6d35ac582200e"
+    },
+    {
+      "page": 9,
+      "raw_overlay_bytes": 9235,
+      "packed_overlay_bytes": 3069,
+      "page_sha256": "f8c13c1e2d8012e82860dfa2e1f20e11a9051a319f0bddd627edfaf20e0701c4"
+    },
+    {
+      "page": 10,
+      "raw_overlay_bytes": 4579,
+      "packed_overlay_bytes": 1715,
+      "page_sha256": "87e3b224c64ec6b14df9922282c7e961ffdf69e61b1bc2daf1f19d62d1e95e3e"
+    },
+    {
+      "page": 11,
+      "raw_overlay_bytes": 4791,
+      "packed_overlay_bytes": 1549,
+      "page_sha256": "a261de302dafa281d053ec417b74e635a673f9a6b463b21549b9bea35da1f727"
+    },
+    {
+      "page": 12,
+      "raw_overlay_bytes": 9126,
+      "packed_overlay_bytes": 3119,
+      "page_sha256": "5b09a15a158f1ca1c7216ba0c8a6916ecd19970513056b74096690886f1f874e"
+    },
+    {
+      "page": 13,
+      "raw_overlay_bytes": 6273,
+      "packed_overlay_bytes": 1432,
+      "page_sha256": "2492d06a6f832a5ae97b5b392c0dc188fcd47c0870af786566545e533b012773"
+    },
+    {
+      "page": 14,
+      "raw_overlay_bytes": 3136,
+      "packed_overlay_bytes": 484,
+      "page_sha256": "f42c7cde055c8d1d0f0c1f51f09f7442a2a0c9b57638faaa06f5659bc9b76b20"
+    },
+    {
+      "page": 15,
+      "raw_overlay_bytes": 7276,
+      "packed_overlay_bytes": 2506,
+      "page_sha256": "fc3c148d879b38f004c53aa0500c24de9e89bebe40956cbea208e7da84e45b96"
+    },
+    {
+      "page": 16,
+      "raw_overlay_bytes": 5108,
+      "packed_overlay_bytes": 1469,
+      "page_sha256": "b3909c63257a947e62bc294d43b79771f8bdd2b152a18a375fff0453d3062afa"
+    },
+    {
+      "page": 17,
+      "raw_overlay_bytes": 6507,
+      "packed_overlay_bytes": 2255,
+      "page_sha256": "44378f9aae9a7529072c2acccdae2900d8ca01af9c285ecb2e8e049f6709b7da"
+    },
+    {
+      "page": 18,
+      "raw_overlay_bytes": 3142,
+      "packed_overlay_bytes": 727,
+      "page_sha256": "9ff342085ba06243018dc0541676e68876cb0928dc8bee4d516342f80e8c7fc3"
+    },
+    {
+      "page": 19,
+      "raw_overlay_bytes": 5131,
+      "packed_overlay_bytes": 1847,
+      "page_sha256": "6bf30e1e4473dbe3672ccaaaf4a6381192b5d36a04e4da93a9f3c6503d98615c"
+    },
+    {
+      "page": 20,
+      "raw_overlay_bytes": 4751,
+      "packed_overlay_bytes": 1953,
+      "page_sha256": "2a9e755acf4f552aa0b6fa08ec99220ab307b07d671f3dd63513cc8c37dd57f2"
+    },
+    {
+      "page": 21,
+      "raw_overlay_bytes": 9877,
+      "packed_overlay_bytes": 3230,
+      "page_sha256": "f42e5d66f6d7e4afea9ce5e8997ddf015599d9807e49987b661684c0a5c2b0fa"
+    },
+    {
+      "page": 22,
+      "raw_overlay_bytes": 5848,
+      "packed_overlay_bytes": 1698,
+      "page_sha256": "7ea7838803163048c8a5c94b838616b28ff88d6cffe6db06d09a7c0890d6b1f6"
+    },
+    {
+      "page": 23,
+      "raw_overlay_bytes": 9267,
+      "packed_overlay_bytes": 3317,
+      "page_sha256": "ab131aae6c0b2d7450ff03b990287c440afb6660cf16447e30896f46e8b63104"
+    },
+    {
+      "page": 24,
+      "raw_overlay_bytes": 5801,
+      "packed_overlay_bytes": 2091,
+      "page_sha256": "3ebda0a0d1e30f98620ce72ff8e1829c8894224f37cc1d725bfbffd3d013f3a2"
+    },
+    {
+      "page": 25,
+      "raw_overlay_bytes": 12006,
+      "packed_overlay_bytes": 3552,
+      "page_sha256": "ef4ae9c5c74aea0edd121d015f9286bed7acc104428f626f9259b61d8243e1a3"
+    },
+    {
+      "page": 26,
+      "raw_overlay_bytes": 3129,
+      "packed_overlay_bytes": 1403,
+      "page_sha256": "909abf18bb0e8e39aa35c08fab5f376066f809d07ca7a70367c67e7334dd0e3f"
+    },
+    {
+      "page": 27,
+      "raw_overlay_bytes": 10746,
+      "packed_overlay_bytes": 3504,
+      "page_sha256": "bbfeabc7383b72d670eaf0f033122cf053004b03624f8763cedbacbc59e778e4"
+    },
+    {
+      "page": 28,
+      "raw_overlay_bytes": 6988,
+      "packed_overlay_bytes": 2182,
+      "page_sha256": "3a6cfcc4fe74f258161b9ce3978b8fb94a55d3bed3cfdd271587dc65da0dfbad"
+    },
+    {
+      "page": 29,
+      "raw_overlay_bytes": 5760,
+      "packed_overlay_bytes": 2197,
+      "page_sha256": "4ae9f308c50aa44661180bd16c0a91ee568af7d2d747ed57cb0500ec856697f2"
+    },
+    {
+      "page": 30,
+      "raw_overlay_bytes": 2264,
+      "packed_overlay_bytes": 824,
+      "page_sha256": "9bf3820d1e06e3e2ee457db1497dab7b137538bdf5b77239cba66991c92775b5"
+    },
+    {
+      "page": 31,
+      "raw_overlay_bytes": 702,
+      "packed_overlay_bytes": 483,
+      "page_sha256": "c3e548bd4a50afa826ec51a892565681521fd8fa72fa1ef103b96fab65b11929"
+    },
+    {
+      "page": 32,
+      "raw_overlay_bytes": 513,
+      "packed_overlay_bytes": 306,
+      "page_sha256": "c4cbb1f65973bd55ad42fc95f8bdef3193a09ddf2a97c8eb3afeab8692e84a3b"
+    },
+    {
+      "page": 33,
+      "raw_overlay_bytes": 982,
+      "packed_overlay_bytes": 606,
+      "page_sha256": "21564e484a5d9c423414859bf668e74e7fe9a0f180b5304bc20750be0d5c8828"
+    },
+    {
+      "page": 34,
+      "raw_overlay_bytes": 1891,
+      "packed_overlay_bytes": 1123,
+      "page_sha256": "3d06d4b45ccd91a188a069ab2a00494b4e6174c7ca35115e6861d86d2c491ecd"
+    },
+    {
+      "page": 35,
+      "raw_overlay_bytes": 2122,
+      "packed_overlay_bytes": 759,
+      "page_sha256": "3519ef642a180897e08fe8808abf3fe1dd58036ad655ceb5f40873896e05ee9e"
+    },
+    {
+      "page": 36,
+      "raw_overlay_bytes": 2772,
+      "packed_overlay_bytes": 1289,
+      "page_sha256": "9686c8d872b0676cb158d1bd4020658c88f957a22810d5196d27b5a4dc50c0ec"
+    },
+    {
+      "page": 37,
+      "raw_overlay_bytes": 7079,
+      "packed_overlay_bytes": 2996,
+      "page_sha256": "992b3f8d4bf158907df42e58e6f680093ada27194b12b85707450758bacdabf6"
+    }
+  ]
+}

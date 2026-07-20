@@ -1,0 +1,637 @@
+{
+  "name": "Bomberman '94",
+  "container": "KCPZ",
+  "kcpz_version": 2,
+  "compression": "standard ZX0 v2; optimal for template/first 18 overlays and quick-mode ZX0 for the remaining overlays",
+  "source_file": "Bomberman_94_PC_Engine_SCCplus_chunked_prototype.ksp",
+  "source_bytes": 465028,
+  "source_sha256": "86f3609abc8a4ea0750e84c5979d129d0989d50036391f2552d649f2f70dcde6",
+  "output_file": "Bomberman_94_PC_Engine_SCCplus_chunked_compressed.ksp",
+  "output_bytes": 146983,
+  "output_sha256": "98c665117d077218ed555b18881066b51149bc8e8b058b2a500ce724df53ccfd",
+  "reduction_bytes": 318045,
+  "reduction_percent": 68.39,
+  "public_tracks": 32,
+  "internal_pages": 54,
+  "template_raw_bytes": 16384,
+  "template_packed_bytes": 320,
+  "all_streams_roundtrip_exact": true,
+  "all_materialized_pages_byte_identical_to_kcpx": true,
+  "pages": [
+    {
+      "page": 0,
+      "raw_overlay_bytes": 5630,
+      "packed_overlay_bytes": 2181,
+      "page_sha256": "d11c271930b8342d9a1e0239ddd3699a9d3778557ffddf410b16e1255668871f"
+    },
+    {
+      "page": 1,
+      "raw_overlay_bytes": 5980,
+      "packed_overlay_bytes": 2336,
+      "page_sha256": "ff09ac769e04392ddd1ce27587e10ab1d8291daaf48a436f11fc4f279295bba3"
+    },
+    {
+      "page": 2,
+      "raw_overlay_bytes": 3596,
+      "packed_overlay_bytes": 1413,
+      "page_sha256": "c44815ec0e231bcd8e567ceef40b7d7c05548f092cfba6bfec2d61af857572f4"
+    },
+    {
+      "page": 3,
+      "raw_overlay_bytes": 8316,
+      "packed_overlay_bytes": 2002,
+      "page_sha256": "d3c4daa4a0f128c656dd2259e9e85effbb909e41db25f7fdfe2a597a09402fe3"
+    },
+    {
+      "page": 4,
+      "raw_overlay_bytes": 3920,
+      "packed_overlay_bytes": 896,
+      "page_sha256": "1a4b28cca4cb6d1e0e7d21ba02ffc9e0495e0fc440f30b8e56631ba39304df36"
+    },
+    {
+      "page": 5,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 3978,
+      "page_sha256": "d87f4b879c0cff9496753093931be58307881325ebf042a5fb24252c48e42921"
+    },
+    {
+      "page": 6,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4229,
+      "page_sha256": "ea1c8459a47dabadd938f3b5d57134edb4e4b02ea041a2055dbb08dc8e2d92c5"
+    },
+    {
+      "page": 7,
+      "raw_overlay_bytes": 5080,
+      "packed_overlay_bytes": 1915,
+      "page_sha256": "cce5b014fd31f222095e12cf25a915b49814aea0a2e112da65b6ae94196fd615"
+    },
+    {
+      "page": 8,
+      "raw_overlay_bytes": 1104,
+      "packed_overlay_bytes": 600,
+      "page_sha256": "ec39dd0534de9a85194b5183f6c7a669538de9a6462154080da35e7eebded4ce"
+    },
+    {
+      "page": 9,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4314,
+      "page_sha256": "686df98333b788827e53ade789a3b3e95981bd6cfd52257065fc6151427af22c"
+    },
+    {
+      "page": 10,
+      "raw_overlay_bytes": 14331,
+      "packed_overlay_bytes": 4409,
+      "page_sha256": "fbf68970a5d9b677a913c797c8a32a761ee64815f0abd3434e6e8576d3fb24bf"
+    },
+    {
+      "page": 11,
+      "raw_overlay_bytes": 2685,
+      "packed_overlay_bytes": 969,
+      "page_sha256": "0122797152e8103c37dde41f58875dee3b2519273fb6123f81a902fdc40e43b0"
+    },
+    {
+      "page": 12,
+      "raw_overlay_bytes": 14328,
+      "packed_overlay_bytes": 5069,
+      "page_sha256": "fb543fa8974ad71be0d28e70390084c8028e5b06e5009e84b32137b58e33ac91"
+    },
+    {
+      "page": 13,
+      "raw_overlay_bytes": 14336,
+      "packed_overlay_bytes": 5382,
+      "page_sha256": "005b63b3635b9d22090a9af9c173ca6b40fde1882b9c227bb5eed9cae3b16d86"
+    },
+    {
+      "page": 14,
+      "raw_overlay_bytes": 5888,
+      "packed_overlay_bytes": 2692,
+      "page_sha256": "0ea4e08111107a84cff66c920562a88cc60bff5640e499bb0aadf3c31ac26216"
+    },
+    {
+      "page": 15,
+      "raw_overlay_bytes": 14323,
+      "packed_overlay_bytes": 3986,
+      "page_sha256": "29331cf17b6dd284e52ccf1dab2bd0f0d0ca82d7af47797c02990bdb6a0aae78"
+    },
+    {
+      "page": 16,
+      "raw_overlay_bytes": 7654,
+      "packed_overlay_bytes": 3131,
+      "page_sha256": "c9a7835f2cfcbe3e8071252aeb8101d2f98e2fbf8e2918e6dbae7e153868c5db"
+    },
+    {
+      "page": 17,
+      "raw_overlay_bytes": 14331,
+      "packed_overlay_bytes": 4705,
+      "page_sha256": "a8d53f7b11e1f30ca90e7a1baeb44079aeb53bc4cfdeb8047c4bf225367729ea"
+    },
+    {
+      "page": 18,
+      "raw_overlay_bytes": 14337,
+      "packed_overlay_bytes": 4782,
+      "page_sha256": "83a11ee08d85f12bac6f1bc2e5d4237d53acd8c5ebc2949e35dd35c951687b06"
+    },
+    {
+      "page": 19,
+      "raw_overlay_bytes": 11379,
+      "packed_overlay_bytes": 3972,
+      "page_sha256": "030821d75c1b0c46109009dee65a464b7ac237ca3a67e9464e54cfa1d11852fb"
+    },
+    {
+      "page": 20,
+      "raw_overlay_bytes": 14338,
+      "packed_overlay_bytes": 4712,
+      "page_sha256": "b669d1a444ed7e2e80000aad4457a8e9dde8d40c1c174153008de58813ef0a6b"
+    },
+    {
+      "page": 21,
+      "raw_overlay_bytes": 11335,
+      "packed_overlay_bytes": 3883,
+      "page_sha256": "e0fadd5ed7c6ed5bd2835b6c6caa970f37b220abc4a9c427519946967ff8a914"
+    },
+    {
+      "page": 22,
+      "raw_overlay_bytes": 14339,
+      "packed_overlay_bytes": 3982,
+      "page_sha256": "f418e7b68802280232c7461247ffd0707265686fdabb3e0689789951263f6559"
+    },
+    {
+      "page": 23,
+      "raw_overlay_bytes": 14336,
+      "packed_overlay_bytes": 3727,
+      "page_sha256": "3e4a8862ec6ba8926d607d51b507ab3989896c3d229dbe48f1a3b947706827ad"
+    },
+    {
+      "page": 24,
+      "raw_overlay_bytes": 14337,
+      "packed_overlay_bytes": 3804,
+      "page_sha256": "ce0da4e624d40cd16a3aada666d3bfe22536c75d4c22860a21629ae7d6fb1e4b"
+    },
+    {
+      "page": 25,
+      "raw_overlay_bytes": 5714,
+      "packed_overlay_bytes": 2033,
+      "page_sha256": "d889aa87e7d89d0b7caacd736f3b7d03b001dd16931bd54d7eda720b1fffd2e7"
+    },
+    {
+      "page": 26,
+      "raw_overlay_bytes": 4769,
+      "packed_overlay_bytes": 1788,
+      "page_sha256": "a512fc9bbd0d3eebd4e15e9c280d79d13e0f6e00be3a6c075e3e86464fa15f76"
+    },
+    {
+      "page": 27,
+      "raw_overlay_bytes": 14328,
+      "packed_overlay_bytes": 3982,
+      "page_sha256": "e4ca878abce1286e5f1d1a7d317156114933a142b35c87d0116f3f4098403b0d"
+    },
+    {
+      "page": 28,
+      "raw_overlay_bytes": 14325,
+      "packed_overlay_bytes": 3787,
+      "page_sha256": "2855afdf9eeaa70a5a33f653bc065c60a5ff549e609f1fa70bd337ea4093064e"
+    },
+    {
+      "page": 29,
+      "raw_overlay_bytes": 1721,
+      "packed_overlay_bytes": 841,
+      "page_sha256": "b3b4ef38e47116307e1270251f177db92fb13d59ee32ebfb50deb6c15dcb8713"
+    },
+    {
+      "page": 30,
+      "raw_overlay_bytes": 454,
+      "packed_overlay_bytes": 286,
+      "page_sha256": "bdb53cb77d2f4172a98c2adf47b8ab1b125d6c7892690471e2a20aec43079d6e"
+    },
+    {
+      "page": 31,
+      "raw_overlay_bytes": 14330,
+      "packed_overlay_bytes": 4998,
+      "page_sha256": "5bd77684b1a6c1582b4060cefd59f7fb67fa7101f8959df59d31e3d73d5b8f0b"
+    },
+    {
+      "page": 32,
+      "raw_overlay_bytes": 426,
+      "packed_overlay_bytes": 299,
+      "page_sha256": "3d241609d3a760ccbb50b3680f7281fd0f32d44880d2ed131dfdc7635b4e412c"
+    },
+    {
+      "page": 33,
+      "raw_overlay_bytes": 145,
+      "packed_overlay_bytes": 129,
+      "page_sha256": "9c541ff9fb19bcfad80b2249ef83a82a3cbf95838edf951eab27bd71b63c107b"
+    },
+    {
+      "page": 34,
+      "raw_overlay_bytes": 14331,
+      "packed_overlay_bytes": 5100,
+      "page_sha256": "ed74b09da613470776c7768ec40afdd8f43ded37c9e7d344dc290b02c0af551d"
+    },
+    {
+      "page": 35,
+      "raw_overlay_bytes": 3839,
+      "packed_overlay_bytes": 1399,
+      "page_sha256": "f9df40b0a2eb3bf8e3a9a5a8edf527c41e87bf7311944bdcf17f5ef63c86af2c"
+    },
+    {
+      "page": 36,
+      "raw_overlay_bytes": 761,
+      "packed_overlay_bytes": 359,
+      "page_sha256": "f5637efe2603480162ecd1c9070dbebf124b9393d6bd9e8e6969aabc3e43170e"
+    },
+    {
+      "page": 37,
+      "raw_overlay_bytes": 14338,
+      "packed_overlay_bytes": 4443,
+      "page_sha256": "cd72c57649b82bfdd411cf4db7a098eaf8265c474d94dcd257d4597f809da134"
+    },
+    {
+      "page": 38,
+      "raw_overlay_bytes": 575,
+      "packed_overlay_bytes": 357,
+      "page_sha256": "474ed1ed477a47d7b836c44c0bee04c5ed5da7b811d7b8d77b681dc9cac4598f"
+    },
+    {
+      "page": 39,
+      "raw_overlay_bytes": 1666,
+      "packed_overlay_bytes": 795,
+      "page_sha256": "c24e4c1c67d05a59e4c905cf1eea07d0087dd3e6682d86c46e938e6a7ee13451"
+    },
+    {
+      "page": 40,
+      "raw_overlay_bytes": 550,
+      "packed_overlay_bytes": 386,
+      "page_sha256": "af1292f88597129c751d2fc0b5bc08e0e07a4f28ecfdbda650bd5dddc8e95bb9"
+    },
+    {
+      "page": 41,
+      "raw_overlay_bytes": 14328,
+      "packed_overlay_bytes": 4481,
+      "page_sha256": "b5ec584eff6b611900c088f5f1eb7b3678016283ba96de761171215cfb66b280"
+    },
+    {
+      "page": 42,
+      "raw_overlay_bytes": 13606,
+      "packed_overlay_bytes": 3842,
+      "page_sha256": "1390f81da5a766a917a64597558f4d6ebd8c3aff98b382ccf5f117475dad4950"
+    },
+    {
+      "page": 43,
+      "raw_overlay_bytes": 2093,
+      "packed_overlay_bytes": 874,
+      "page_sha256": "cb00313cdb9085456bc3bf090d84bdc04287d5f9edbdae86cc067c55b563e0d1"
+    },
+    {
+      "page": 44,
+      "raw_overlay_bytes": 8285,
+      "packed_overlay_bytes": 3133,
+      "page_sha256": "91681fd36641ad99f46b6a1c6be195b05f258ebf64650cd49b4d8527f5d278ba"
+    },
+    {
+      "page": 45,
+      "raw_overlay_bytes": 834,
+      "packed_overlay_bytes": 488,
+      "page_sha256": "f0e908c69959645caa5a055f7a7944ba089b9534c7f5b2677dabb29e7b59635c"
+    },
+    {
+      "page": 46,
+      "raw_overlay_bytes": 14334,
+      "packed_overlay_bytes": 4338,
+      "page_sha256": "1eb730e784fec0bb1299f5990ccc387e1d47c996dfebb501f81debfece4cbf9f"
+    },
+    {
+      "page": 47,
+      "raw_overlay_bytes": 14338,
+      "packed_overlay_bytes": 4772,
+      "page_sha256": "eeb3562b598783a45998151c19df286c75df1b15c3e39cb395fa837152a8e129"
+    },
+    {
+      "page": 48,
+      "raw_overlay_bytes": 14340,
+      "packed_overlay_bytes": 4637,
+      "page_sha256": "f5c68b7ca79ba4c2899b5ea2dbb3b4ad9bd419312392b4a94a342e0b0e538c89"
+    },
+    {
+      "page": 49,
+      "raw_overlay_bytes": 5109,
+      "packed_overlay_bytes": 1914,
+      "page_sha256": "b46eb8b40b15ba4f95a292d05dcf09920c93ea72d358c2b39680fe540172fdf5"
+    },
+    {
+      "page": 50,
+      "raw_overlay_bytes": 881,
+      "packed_overlay_bytes": 402,
+      "page_sha256": "e53cf24f30ccec2a18498611e7d8eda2ebc1682ec5e133bc36082128c1c29ca5"
+    },
+    {
+      "page": 51,
+      "raw_overlay_bytes": 2388,
+      "packed_overlay_bytes": 1031,
+      "page_sha256": "d2730c55200963ae9ed6cea6cd57db9639f9a644f61da528cb858db55e1825df"
+    },
+    {
+      "page": 52,
+      "raw_overlay_bytes": 6014,
+      "packed_overlay_bytes": 1531,
+      "page_sha256": "3e184834e874274bf957d9e6169634a6b5163c50de2f1d9744d8d3f23243800c"
+    },
+    {
+      "page": 53,
+      "raw_overlay_bytes": 230,
+      "packed_overlay_bytes": 172,
+      "page_sha256": "5994deba2f36aad3f63185787e1cdeda05fe6e79620344575d7f42541aff108e"
+    }
+  ],
+  "sparse_chunk_staging": "First descriptor packed-size is deliberately expanded to cover every contiguous compressed chunk of that public track; each span fits in at most two 16K file segments.",
+  "track_staging_spans": [
+    {
+      "public_track": 0,
+      "title": "Opening Theme",
+      "first_page": 0,
+      "page_count": 1,
+      "staged_packed_span": 2181,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 1,
+      "title": "Title Theme",
+      "first_page": 1,
+      "page_count": 1,
+      "staged_packed_span": 2336,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 2,
+      "title": "Password Entry",
+      "first_page": 2,
+      "page_count": 1,
+      "staged_packed_span": 1413,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 3,
+      "title": "Area Select",
+      "first_page": 3,
+      "page_count": 1,
+      "staged_packed_span": 2002,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 4,
+      "title": "Stage Select",
+      "first_page": 4,
+      "page_count": 1,
+      "staged_packed_span": 896,
+      "first_file_segment": 0,
+      "last_file_segment": 0
+    },
+    {
+      "public_track": 5,
+      "title": "Area 1: Jammin' Jungle",
+      "first_page": 5,
+      "page_count": 3,
+      "staged_packed_span": 10122,
+      "first_file_segment": 0,
+      "last_file_segment": 1
+    },
+    {
+      "public_track": 6,
+      "title": "Stage Clear",
+      "first_page": 8,
+      "page_count": 1,
+      "staged_packed_span": 600,
+      "first_file_segment": 1,
+      "last_file_segment": 1
+    },
+    {
+      "public_track": 7,
+      "title": "Boss Theme 1 (Areas 1, 3, 4, 5)",
+      "first_page": 9,
+      "page_count": 3,
+      "staged_packed_span": 9692,
+      "first_file_segment": 1,
+      "last_file_segment": 1
+    },
+    {
+      "public_track": 8,
+      "title": "Area 2: Vexin' Volcano",
+      "first_page": 12,
+      "page_count": 3,
+      "staged_packed_span": 13143,
+      "first_file_segment": 1,
+      "last_file_segment": 2
+    },
+    {
+      "public_track": 9,
+      "title": "Boss Theme 2 (Area 2)",
+      "first_page": 15,
+      "page_count": 2,
+      "staged_packed_span": 7117,
+      "first_file_segment": 2,
+      "last_file_segment": 3
+    },
+    {
+      "public_track": 10,
+      "title": "Area 3: Slammin' Sea",
+      "first_page": 17,
+      "page_count": 3,
+      "staged_packed_span": 13459,
+      "first_file_segment": 3,
+      "last_file_segment": 3
+    },
+    {
+      "public_track": 11,
+      "title": "Area 4: Crankin' Castle",
+      "first_page": 20,
+      "page_count": 2,
+      "staged_packed_span": 8595,
+      "first_file_segment": 3,
+      "last_file_segment": 4
+    },
+    {
+      "public_track": 12,
+      "title": "Area 5: Thrashin' Tundra",
+      "first_page": 22,
+      "page_count": 4,
+      "staged_packed_span": 13546,
+      "first_file_segment": 4,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 13,
+      "title": "Final Area Intro",
+      "first_page": 26,
+      "page_count": 1,
+      "staged_packed_span": 1788,
+      "first_file_segment": 5,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 14,
+      "title": "Final Area",
+      "first_page": 27,
+      "page_count": 3,
+      "staged_packed_span": 8610,
+      "first_file_segment": 5,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 15,
+      "title": "Final Boss (Part 1 Intro)",
+      "first_page": 30,
+      "page_count": 1,
+      "staged_packed_span": 286,
+      "first_file_segment": 5,
+      "last_file_segment": 5
+    },
+    {
+      "public_track": 16,
+      "title": "Final Boss (Part 1)",
+      "first_page": 31,
+      "page_count": 2,
+      "staged_packed_span": 5297,
+      "first_file_segment": 5,
+      "last_file_segment": 6
+    },
+    {
+      "public_track": 17,
+      "title": "Final Boss (Part 2 Intro)",
+      "first_page": 33,
+      "page_count": 1,
+      "staged_packed_span": 129,
+      "first_file_segment": 6,
+      "last_file_segment": 6
+    },
+    {
+      "public_track": 18,
+      "title": "Final Boss (Part 2)",
+      "first_page": 34,
+      "page_count": 2,
+      "staged_packed_span": 6499,
+      "first_file_segment": 6,
+      "last_file_segment": 6
+    },
+    {
+      "public_track": 19,
+      "title": "Final Boss (Part 3 Intro)",
+      "first_page": 36,
+      "page_count": 1,
+      "staged_packed_span": 359,
+      "first_file_segment": 6,
+      "last_file_segment": 6
+    },
+    {
+      "public_track": 20,
+      "title": "Final Boss (Part 3)",
+      "first_page": 37,
+      "page_count": 2,
+      "staged_packed_span": 4800,
+      "first_file_segment": 6,
+      "last_file_segment": 6
+    },
+    {
+      "public_track": 21,
+      "title": "Game Clear",
+      "first_page": 39,
+      "page_count": 1,
+      "staged_packed_span": 795,
+      "first_file_segment": 6,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 22,
+      "title": "Player Death",
+      "first_page": 40,
+      "page_count": 1,
+      "staged_packed_span": 386,
+      "first_file_segment": 7,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 23,
+      "title": "Staff Roll",
+      "first_page": 41,
+      "page_count": 2,
+      "staged_packed_span": 8323,
+      "first_file_segment": 7,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 24,
+      "title": "Game Over",
+      "first_page": 43,
+      "page_count": 1,
+      "staged_packed_span": 874,
+      "first_file_segment": 7,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 25,
+      "title": "Battle Configuration",
+      "first_page": 44,
+      "page_count": 1,
+      "staged_packed_span": 3133,
+      "first_file_segment": 7,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 26,
+      "title": "Battle Start",
+      "first_page": 45,
+      "page_count": 1,
+      "staged_packed_span": 488,
+      "first_file_segment": 7,
+      "last_file_segment": 7
+    },
+    {
+      "public_track": 27,
+      "title": "Battle Theme",
+      "first_page": 46,
+      "page_count": 4,
+      "staged_packed_span": 15661,
+      "first_file_segment": 7,
+      "last_file_segment": 8
+    },
+    {
+      "public_track": 28,
+      "title": "Battle Win",
+      "first_page": 50,
+      "page_count": 1,
+      "staged_packed_span": 402,
+      "first_file_segment": 8,
+      "last_file_segment": 8
+    },
+    {
+      "public_track": 29,
+      "title": "Battle Draw",
+      "first_page": 51,
+      "page_count": 1,
+      "staged_packed_span": 1031,
+      "first_file_segment": 8,
+      "last_file_segment": 8
+    },
+    {
+      "public_track": 30,
+      "title": "Battle Victory",
+      "first_page": 52,
+      "page_count": 1,
+      "staged_packed_span": 1531,
+      "first_file_segment": 8,
+      "last_file_segment": 8
+    },
+    {
+      "public_track": 31,
+      "title": "Unknown Fanfare",
+      "first_page": 53,
+      "page_count": 1,
+      "staged_packed_span": 172,
+      "first_file_segment": 8,
+      "last_file_segment": 8
+    }
+  ]
+}

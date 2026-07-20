@@ -29,6 +29,7 @@
 #include "kss/kss.h"
 #include "kssplay.h"
 #include "ksp/ksp.h"
+#include "zx_decompressor.h"
 #ifdef KSS_HAVE_MOONSOUND
 #include "moonsound_opl4.h"
 #endif
@@ -62,10 +63,12 @@ typedef struct {
 typedef struct {
   int is_ksp;
   KSP_INDEX index;
+  struct KCPRuntime *kcp;
 } KSPResources;
 
 typedef struct {
   KSSPLAY *player;
+  struct KCPRuntime *kcp;
   uint32_t rate;
   uint8_t channels;
   uint64_t total_frames;
@@ -526,10 +529,381 @@ static int parse_options(int argc, char **argv, Options *options) {
   return 1;
 }
 
+typedef struct KCPRuntime {
+  int active;
+  int applying;
+  SDL_atomic_t failed;
+  char format[5];
+  uint8_t page_count;
+  uint8_t track_count;
+  uint8_t active_page;
+  uint8_t song_id[256];
+  uint8_t song_page[256];
+  uint16_t load_address;
+  uint16_t page_size;
+  uint16_t overlay_address;
+  uint8_t *pages;
+  KSSPLAY *player;
+} KCPRuntime;
+
+#define KCP_FIXED_SIZE 528u
+#define KCP_PAGE_BYTES 0x4000u
+#define KCP_GATEWAY_ADDRESS 0xD8A0u
+#define KCP_GATEWAY_MAILBOX 0xD89Fu
+
+static uint16_t kcp_read_u16(const uint8_t *data) {
+  return (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+}
+
+static uint32_t kcp_read_u32(const uint8_t *data) {
+  return (uint32_t)data[0] |
+         ((uint32_t)data[1] << 8) |
+         ((uint32_t)data[2] << 16) |
+         ((uint32_t)data[3] << 24);
+}
+
+static int kcp_read_file(const char *path, uint8_t **data, size_t *size) {
+  FILE *file;
+  long length;
+  uint8_t *buffer;
+
+  *data = NULL;
+  *size = 0;
+  file = fopen(path, "rb");
+  if (!file) {
+    fprintf(stderr, "error: cannot open KSP/KSS file: %s\n", path);
+    return 0;
+  }
+  if (fseek(file, 0, SEEK_END) != 0 || (length = ftell(file)) < 0 ||
+      fseek(file, 0, SEEK_SET) != 0) {
+    fprintf(stderr, "error: cannot determine file size: %s\n", path);
+    fclose(file);
+    return 0;
+  }
+  buffer = (uint8_t *)malloc(length ? (size_t)length : 1u);
+  if (!buffer) {
+    fprintf(stderr, "error: out of memory while reading %s\n", path);
+    fclose(file);
+    return 0;
+  }
+  if (length && fread(buffer, 1, (size_t)length, file) != (size_t)length) {
+    fprintf(stderr, "error: cannot read KSP/KSS file: %s\n", path);
+    free(buffer);
+    fclose(file);
+    return 0;
+  }
+  fclose(file);
+  *data = buffer;
+  *size = (size_t)length;
+  return 1;
+}
+
+static void kcp_runtime_release(KCPRuntime *runtime) {
+  if (!runtime) return;
+  free(runtime->pages);
+  memset(runtime, 0, sizeof(*runtime));
+}
+
+static int kcp_apply_sparse_overlay(uint8_t *page, uint32_t page_size,
+                                    const uint8_t *overlay,
+                                    uint32_t overlay_size) {
+  uint32_t cursor = 0;
+
+  while (cursor < overlay_size) {
+    uint32_t offset;
+    uint32_t length;
+    if (overlay_size - cursor < 4u) return 0;
+    offset = kcp_read_u16(overlay + cursor);
+    length = kcp_read_u16(overlay + cursor + 2u);
+    cursor += 4u;
+    if (length > overlay_size - cursor || offset > page_size ||
+        length > page_size - offset) {
+      return 0;
+    }
+    memcpy(page + offset, overlay + cursor, length);
+    cursor += length;
+  }
+  return 1;
+}
+
+static int kcp_runtime_load(const char *path, KCPRuntime *runtime) {
+  uint8_t *file_data = NULL;
+  uint8_t *template_page = NULL;
+  uint8_t *overlay = NULL;
+  const uint8_t *fixed;
+  const uint8_t *kcp;
+  size_t file_size = 0;
+  size_t kcp_offset;
+  size_t kcp_size;
+  size_t cursor;
+  uint32_t load_size;
+  uint32_t page_count;
+  uint32_t page_index;
+  uint32_t page_size;
+  uint32_t load_address;
+  uint32_t overlay_address;
+  int compressed;
+  int result = -1;
+
+  memset(runtime, 0, sizeof(*runtime));
+  if (!kcp_read_file(path, &file_data, &file_size)) return -1;
+  if (file_size < 0x20u ||
+      (memcmp(file_data, "KSCC", 4) != 0 &&
+       memcmp(file_data, "KSSX", 4) != 0)) {
+    result = 0;
+    goto cleanup;
+  }
+
+  load_size = kcp_read_u16(file_data + 6u);
+  kcp_offset = 0x20u + (size_t)load_size;
+  if (kcp_offset > file_size || file_size - kcp_offset < 4u) {
+    result = 0;
+    goto cleanup;
+  }
+  kcp = file_data + kcp_offset;
+  compressed = memcmp(kcp, "KCPZ", 4) == 0;
+  if (!compressed && memcmp(kcp, "KCPX", 4) != 0) {
+    result = 0;
+    goto cleanup;
+  }
+  kcp_size = file_size - kcp_offset;
+  if (kcp_size < KCP_FIXED_SIZE) {
+    fprintf(stderr, "error: truncated %.4s container in %s\n", kcp, path);
+    goto cleanup;
+  }
+
+  fixed = kcp;
+  page_count = fixed[5];
+  load_address = kcp_read_u16(fixed + 8u);
+  page_size = kcp_read_u16(fixed + 10u);
+  overlay_address = kcp_read_u16(fixed + 12u);
+  if (page_count == 0 || page_size != KCP_PAGE_BYTES ||
+      load_address + page_size > 0x10000u ||
+      overlay_address < load_address ||
+      overlay_address > load_address + page_size) {
+    fprintf(stderr, "error: unsupported %.4s page layout in %s\n",
+            kcp, path);
+    goto cleanup;
+  }
+  if ((!compressed && fixed[4] != 1u) ||
+      (compressed && fixed[4] != 1u && fixed[4] != 2u)) {
+    fprintf(stderr, "error: unsupported %.4s version %u in %s\n",
+            kcp, fixed[4], path);
+    goto cleanup;
+  }
+  if ((size_t)page_count > SIZE_MAX / page_size) {
+    fprintf(stderr, "error: %.4s page table is too large\n", kcp);
+    goto cleanup;
+  }
+
+  runtime->pages = (uint8_t *)malloc((size_t)page_count * page_size);
+  template_page = (uint8_t *)malloc(page_size);
+  if (!runtime->pages || !template_page) {
+    fprintf(stderr, "error: out of memory loading %.4s pages\n", kcp);
+    goto cleanup;
+  }
+
+  if (!compressed) {
+    if (kcp_size < KCP_FIXED_SIZE + page_size) {
+      fprintf(stderr, "error: truncated KCPX template in %s\n", path);
+      goto cleanup;
+    }
+    memcpy(template_page, kcp + KCP_FIXED_SIZE, page_size);
+    cursor = KCP_FIXED_SIZE + page_size;
+    for (page_index = 0; page_index < page_count; page_index++) {
+      uint32_t raw_size;
+      uint8_t *page = runtime->pages + (size_t)page_index * page_size;
+      if (cursor > kcp_size || kcp_size - cursor < 2u) {
+        fprintf(stderr, "error: truncated KCPX page %u descriptor\n",
+                page_index);
+        goto cleanup;
+      }
+      raw_size = kcp_read_u16(kcp + cursor);
+      cursor += 2u;
+      if (raw_size > kcp_size - cursor) {
+        fprintf(stderr, "error: truncated KCPX page %u overlay\n",
+                page_index);
+        goto cleanup;
+      }
+      memcpy(page, template_page, page_size);
+      if (!kcp_apply_sparse_overlay(page, page_size,
+                                    kcp + cursor, raw_size)) {
+        fprintf(stderr, "error: invalid KCPX page %u overlay\n",
+                page_index);
+        goto cleanup;
+      }
+      cursor += raw_size;
+    }
+  } else {
+    uint32_t version = fixed[4];
+    uint32_t record_size = version == 2u ? 8u : 6u;
+    uint32_t packed_template_size;
+    uint32_t template_offset;
+
+    if (kcp_size < KCP_FIXED_SIZE + 4u +
+                   (size_t)page_count * record_size) {
+      fprintf(stderr, "error: truncated KCPZ descriptor table in %s\n",
+              path);
+      goto cleanup;
+    }
+    packed_template_size = kcp_read_u16(kcp + KCP_FIXED_SIZE);
+    template_offset = kcp_read_u16(kcp + KCP_FIXED_SIZE + 2u);
+    if (template_offset > kcp_size ||
+        packed_template_size > kcp_size - template_offset ||
+        !zx0_decompress_data(kcp + template_offset,
+                             packed_template_size,
+                             template_page, page_size)) {
+      fprintf(stderr, "error: cannot decode KCPZ template in %s\n",
+              path);
+      goto cleanup;
+    }
+
+    for (page_index = 0; page_index < page_count; page_index++) {
+      size_t descriptor = KCP_FIXED_SIZE + 4u +
+                          (size_t)page_index * record_size;
+      uint32_t raw_size = kcp_read_u16(kcp + descriptor);
+      uint32_t packed_size = kcp_read_u16(kcp + descriptor + 2u);
+      uint32_t stream_offset = version == 2u
+          ? kcp_read_u32(kcp + descriptor + 4u)
+          : kcp_read_u16(kcp + descriptor + 4u);
+      uint8_t *page = runtime->pages + (size_t)page_index * page_size;
+
+      if (stream_offset > kcp_size || packed_size > kcp_size - stream_offset) {
+        fprintf(stderr, "error: invalid KCPZ page %u stream\n",
+                page_index);
+        goto cleanup;
+      }
+      free(overlay);
+      overlay = NULL;
+      if (raw_size) {
+        overlay = (uint8_t *)malloc(raw_size);
+        if (!overlay ||
+            !zx0_decompress_data(kcp + stream_offset, packed_size,
+                                 overlay, raw_size)) {
+          fprintf(stderr, "error: cannot decode KCPZ page %u\n",
+                  page_index);
+          goto cleanup;
+        }
+      } else if (packed_size != 0u) {
+        fprintf(stderr, "error: invalid empty KCPZ page %u\n",
+                page_index);
+        goto cleanup;
+      }
+      memcpy(page, template_page, page_size);
+      if (!kcp_apply_sparse_overlay(page, page_size, overlay, raw_size)) {
+        fprintf(stderr, "error: invalid KCPZ page %u overlay\n",
+                page_index);
+        goto cleanup;
+      }
+    }
+  }
+
+  memcpy(runtime->format, kcp, 4);
+  runtime->format[4] = '\0';
+  runtime->page_count = (uint8_t)page_count;
+  runtime->track_count = fixed[6];
+  memcpy(runtime->song_id, fixed + 16u, sizeof(runtime->song_id));
+  memcpy(runtime->song_page, fixed + 272u, sizeof(runtime->song_page));
+  runtime->active_page = 0xffu;
+  runtime->load_address = (uint16_t)load_address;
+  runtime->page_size = (uint16_t)page_size;
+  runtime->overlay_address = (uint16_t)overlay_address;
+  runtime->active = 1;
+  result = 1;
+
+cleanup:
+  free(overlay);
+  free(template_page);
+  free(file_data);
+  if (result < 0) kcp_runtime_release(runtime);
+  return result;
+}
+
+static void kcp_runtime_memwrite(void *context, uint32_t address,
+                                 uint32_t data) {
+  KCPRuntime *runtime = (KCPRuntime *)context;
+  uint32_t begin;
+  uint32_t end;
+  uint32_t target;
+  const uint8_t *page;
+
+  if (!runtime || !runtime->active || runtime->applying ||
+      address != KCP_GATEWAY_MAILBOX) {
+    return;
+  }
+  if (data >= runtime->page_count || !runtime->player) {
+    SDL_AtomicSet(&runtime->failed, 1);
+    return;
+  }
+
+  begin = runtime->overlay_address;
+  end = (uint32_t)runtime->load_address + runtime->page_size;
+  page = runtime->pages + (size_t)data * runtime->page_size;
+  runtime->applying = 1;
+  for (target = begin; target < end; target++) {
+    KSSPLAY_write_memory(runtime->player, target,
+                         page[target - runtime->load_address]);
+  }
+  runtime->applying = 0;
+  runtime->active_page = (uint8_t)data;
+}
+
+static uint32_t kcp_runtime_engine_song(const KCPRuntime *runtime,
+                                        uint32_t public_song) {
+  uint8_t song;
+
+  if (!runtime || !runtime->active || public_song >= 256u)
+    return public_song;
+  song = runtime->song_id[public_song];
+  return song == 0xffu ? 0u : song;
+}
+
+static int kcp_runtime_install(KCPRuntime *runtime, KSSPLAY *player,
+                               uint32_t public_song) {
+  static const uint8_t gateway[] = {
+      0x32, (uint8_t)(KCP_GATEWAY_MAILBOX & 0xffu),
+      (uint8_t)(KCP_GATEWAY_MAILBOX >> 8), 0xc9
+  }; /* LD (D89FH),A / RET */
+  uint32_t index;
+  uint32_t page_index;
+  const uint8_t *page;
+
+  if (!runtime || !runtime->active || !player) return 1;
+  if (public_song >= 256u ||
+      (page_index = runtime->song_page[public_song]) >= runtime->page_count) {
+    fprintf(stderr, "error: KCP song %u has no valid page mapping\n",
+            public_song);
+    return 0;
+  }
+  runtime->player = player;
+  SDL_AtomicSet(&runtime->failed, 0);
+  runtime->applying = 1;
+  page = runtime->pages + (size_t)page_index * runtime->page_size;
+  for (index = 0; index < runtime->page_size; index++) {
+    KSSPLAY_write_memory(player, runtime->load_address + index, page[index]);
+  }
+  for (index = 0; index < sizeof(gateway); index++) {
+    KSSPLAY_write_memory(player, KCP_GATEWAY_ADDRESS + index,
+                         gateway[index]);
+  }
+  runtime->applying = 0;
+  runtime->active_page = (uint8_t)page_index;
+  KSSPLAY_set_memwrite_handler(player, runtime, kcp_runtime_memwrite);
+  return 1;
+}
+
 static int load_ksp_resources(const char *path, KSPResources *resources) {
   char error[256];
+  int kcp_result;
 
   memset(resources, 0, sizeof(*resources));
+  resources->kcp = (KCPRuntime *)calloc(1, sizeof(KCPRuntime));
+  if (!resources->kcp) {
+    fprintf(stderr, "error: out of memory allocating KCP runtime\n");
+    return -1;
+  }
+  kcp_result = kcp_runtime_load(path, resources->kcp);
+  if (kcp_result < 0) return -1;
   if (!ksp_validate_file(path, 1, &resources->index, error, sizeof(error))) {
     /* Ordinary KSS files do not have a KSP trailer. */
     return 0;
@@ -551,6 +925,14 @@ static const KSP_ENTRY *ksp_song_entry(const KSPResources *resources,
 
 static int adjacent_song(const KSPResources *resources, const KSS *kss,
                          int current, int direction, int *result) {
+  if (resources && resources->kcp && resources->kcp->active) {
+    int last = (int)resources->kcp->track_count - 1;
+    if ((direction > 0 && current >= last) ||
+        (direction < 0 && current <= 0))
+      return 0;
+    *result = current + direction;
+    return 1;
+  }
   if (resources && resources->is_ksp &&
       ksp_index_is_compact(&resources->index)) {
     uint32_t i;
@@ -736,11 +1118,23 @@ static void release_ksp_resources(KSPResources *resources) {
     return;
   if (resources->is_ksp)
     ksp_free_index(&resources->index);
+  if (resources->kcp) {
+    kcp_runtime_release(resources->kcp);
+    free(resources->kcp);
+    resources->kcp = NULL;
+  }
   memset(resources, 0, sizeof(*resources));
 }
 
 static void print_info(const KSS *kss, const KSPResources *resources) {
-  if (resources && resources->is_ksp) {
+  if (resources && resources->kcp && resources->kcp->active) {
+    printf("container: %s\n", resources->kcp->format);
+    printf("KCP pages: %u (%u public tracks)\n",
+           resources->kcp->page_count, resources->kcp->track_count);
+    printf("runtime overlay: $%04X-$%04X\n",
+           resources->kcp->overlay_address,
+           (unsigned)(resources->kcp->load_address + resources->kcp->page_size - 1u));
+  } else if (resources && resources->is_ksp) {
     printf("container: KSP1\n");
     printf("KSP chunks: %u\n", resources->index.entry_count);
     {
@@ -764,7 +1158,11 @@ static void print_info(const KSS *kss, const KSPResources *resources) {
   printf("play: $%04X\n", kss->play_adr);
   printf("banks: %u (%s)\n", kss->bank_num,
          kss->bank_mode == KSS_8K ? "8K" : "16K");
-  printf("songs: %u-%u\n", kss->trk_min, kss->trk_max);
+  if (resources && resources->kcp && resources->kcp->active) {
+    printf("songs: 0-%u\n", (unsigned)resources->kcp->track_count - 1u);
+  } else {
+    printf("songs: %u-%u\n", kss->trk_min, kss->trk_max);
+  }
   printf("info records: %u\n", kss->info_num);
 }
 
@@ -790,6 +1188,10 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
   }
 
   KSSPLAY_calc(state->player, (int16_t *)stream, (uint32_t)frames);
+  if (state->kcp && SDL_AtomicGet(&state->kcp->failed)) {
+    SDL_AtomicSet(&state->done, 1);
+    return;
+  }
   state->rendered_frames += (uint64_t)frames;
 
   if (!state->fade_started && state->fade_seconds > 0) {
@@ -818,7 +1220,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int length) {
 }
 
 static int play_audio(const Options *options, KSS **kss_pointer,
-                      const KSPResources *resources) {
+                      KSPResources *resources) {
   SDL_AudioSpec desired;
   SDL_AudioSpec actual;
   SDL_AudioDeviceID device = 0;
@@ -868,6 +1270,8 @@ static int play_audio(const Options *options, KSS **kss_pointer,
   state.channels = actual.channels;
   state.fade_seconds = options->fade_seconds;
   state.loops = options->loops;
+  state.kcp = resources && resources->kcp && resources->kcp->active
+      ? resources->kcp : NULL;
   set_track_duration(&state, kss, current_song, options->seconds);
   state.player = KSSPLAY_new(state.rate, state.channels, 16);
   if (!state.player) {
@@ -930,7 +1334,13 @@ static int play_audio(const Options *options, KSS **kss_pointer,
   }
   if (options->mapper_base_set)
     KSSPLAY_set_mapper_base(state.player, (uint32_t)options->mapper_base);
-  KSSPLAY_reset(state.player, (uint32_t)current_song, 0);
+  KSSPLAY_reset(state.player,
+                kcp_runtime_engine_song(state.kcp,
+                                        (uint32_t)current_song),
+                0);
+  if (!kcp_runtime_install(state.kcp, state.player,
+                           (uint32_t)current_song))
+    goto cleanup;
   KSSPLAY_set_device_quality(state.player, KSS_DEVICE_PSG,
                              (uint32_t)options->quality);
   KSSPLAY_set_device_quality(state.player, KSS_DEVICE_SCC,
@@ -963,6 +1373,10 @@ static int play_audio(const Options *options, KSS **kss_pointer,
     TerminalAction action = terminal_poll_action(&terminal);
     int automatic_next = 0;
 
+    if (state.kcp && SDL_AtomicGet(&state.kcp->failed)) {
+      fprintf(stderr, "error: invalid internal KCP page request\n");
+      break;
+    }
     if (SDL_AtomicGet(&state.done)) {
       if (state.auto_advance) {
         action = TERMINAL_NEXT;
@@ -1020,10 +1434,22 @@ static int play_audio(const Options *options, KSS **kss_pointer,
                 if (options->mapper_base_set)
                   KSSPLAY_set_mapper_base(replacement,
                                           (uint32_t)options->mapper_base);
-                KSSPLAY_reset(replacement, (uint32_t)next_song, 0);
-                configure_player_output(replacement, options, state.channels);
-                old_player = state.player;
-                state.player = replacement;
+                KSSPLAY_reset(replacement,
+                              kcp_runtime_engine_song(state.kcp,
+                                                      (uint32_t)next_song),
+                              0);
+                if (!kcp_runtime_install(state.kcp, replacement,
+                                         (uint32_t)next_song)) {
+                  KSSPLAY_delete(replacement);
+                  attached = 0;
+                  replacement = NULL;
+                }
+                if (replacement) {
+                  configure_player_output(replacement, options,
+                                          state.channels);
+                  old_player = state.player;
+                  state.player = replacement;
+                }
               }
             } else if (compact &&
                        KSSPLAY_set_data(state.player, next_kss) != 0) {
@@ -1034,16 +1460,25 @@ static int play_audio(const Options *options, KSS **kss_pointer,
             }
           }
           if (attached) {
-            if (old_player == NULL) {
-              if (options->mapper_base_set)
-                KSSPLAY_set_mapper_base(state.player,
-                                        (uint32_t)options->mapper_base);
-              KSSPLAY_reset(state.player, (uint32_t)next_song, 0);
+              if (old_player == NULL) {
+                if (options->mapper_base_set)
+                  KSSPLAY_set_mapper_base(state.player,
+                                          (uint32_t)options->mapper_base);
+                KSSPLAY_reset(state.player,
+                              kcp_runtime_engine_song(state.kcp,
+                                                      (uint32_t)next_song),
+                              0);
+                if (!kcp_runtime_install(state.kcp, state.player,
+                                         (uint32_t)next_song))
+                  attached = 0;
+              }
+            if (attached) {
+              set_track_duration(&state, next_kss, next_song,
+                                 options->seconds);
+              state.rendered_frames = 0;
+              state.fade_started = 0;
+              SDL_AtomicSet(&state.done, 0);
             }
-            set_track_duration(&state, next_kss, next_song, options->seconds);
-            state.rendered_frames = 0;
-            state.fade_started = 0;
-            SDL_AtomicSet(&state.done, 0);
           }
           SDL_UnlockAudioDevice(device);
           SDL_PauseAudioDevice(device, 0);
@@ -1066,10 +1501,14 @@ static int play_audio(const Options *options, KSS **kss_pointer,
     SDL_Delay(25);
   }
   SDL_PauseAudioDevice(device, 1);
-  result = 1;
+  result = !(state.kcp && SDL_AtomicGet(&state.kcp->failed));
 
 cleanup:
   terminal_restore(&terminal);
+  if (state.kcp && state.player) {
+    KSSPLAY_set_memwrite_handler(state.player, NULL, NULL);
+    state.kcp->player = NULL;
+  }
   if (device) {
     SDL_CloseAudioDevice(device);
   }
@@ -1110,9 +1549,17 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (options.song < kss->trk_min || options.song > kss->trk_max) {
+  if ((resources.kcp && resources.kcp->active &&
+       (options.song < 0 || options.song >= resources.kcp->track_count)) ||
+      ((!resources.kcp || !resources.kcp->active) &&
+       (options.song < kss->trk_min || options.song > kss->trk_max))) {
+    unsigned maximum = resources.kcp && resources.kcp->active
+                           ? (unsigned)resources.kcp->track_count - 1u
+                           : kss->trk_max;
     fprintf(stderr, "error: song %d is outside archive range %u-%u\n",
-            options.song, kss->trk_min, kss->trk_max);
+            options.song,
+            resources.kcp && resources.kcp->active ? 0u : kss->trk_min,
+            maximum);
     KSS_delete(kss);
     release_ksp_resources(&resources);
     return 1;

@@ -1,0 +1,790 @@
+{
+  "status": "chunked SCC+ prototype; requires included KSPPLAYER page-gateway patch",
+  "source_hes_sha256": "e6dd474371bce9e35b5a627b65c324f15afa5d52d7f84a4a79848d94a6003ab1",
+  "output_sha256": "6de7b1db0dbe8a2d6bc19ccd582e1a79c6992e3a731cdf83af7fb5f087e1b1c4",
+  "output_size": 354452,
+  "track_count": 19,
+  "internal_page_count": 35,
+  "engine": {
+    "load": "0x4000",
+    "init": "0x4000",
+    "play": "0x4022",
+    "bytes": 617,
+    "track_overlay": "0x4800",
+    "page_gateway": "0xd8a0"
+  },
+  "conversion": {
+    "HuC6280_channels_1_5": "SCC+ channels 1-5",
+    "HuC6280_channel_6": "MSX PSG tone A",
+    "HuC6280_DDA_and_noise": "MSX PSG noise B envelope",
+    "stereo": "folded to mono",
+    "timing": "60 Hz state/event replay",
+    "long_tracks": "split across internal KCP overlays; engine state remains resident"
+  },
+  "tracks": [
+    {
+      "id": 5,
+      "title": "Azure Way",
+      "duration": 93,
+      "loop": true,
+      "waves": 10,
+      "stream_bytes": 27715,
+      "events": 3004,
+      "block_bytes": 28051,
+      "dda_writes": 0,
+      "public_track": 0,
+      "first_page": 0,
+      "page_count": 2,
+      "page_bytes": [
+        14334,
+        14054
+      ],
+      "page_events": [
+        1459,
+        1545
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Akuma ga Kitarite Utautau",
+      "duration": 63,
+      "loop": true,
+      "waves": 4,
+      "stream_bytes": 20938,
+      "events": 2081,
+      "block_bytes": 21082,
+      "dda_writes": 0,
+      "public_track": 1,
+      "first_page": 2,
+      "page_count": 2,
+      "page_bytes": [
+        14322,
+        6905
+      ],
+      "page_events": [
+        1420,
+        661
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Gizmo Dancing",
+      "duration": 28,
+      "loop": true,
+      "waves": 5,
+      "stream_bytes": 10396,
+      "events": 971,
+      "block_bytes": 10572,
+      "dda_writes": 0,
+      "public_track": 2,
+      "first_page": 4,
+      "page_count": 1,
+      "page_bytes": [
+        10572
+      ],
+      "page_events": [
+        971
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Debug ja nai yo",
+      "duration": 77,
+      "loop": true,
+      "waves": 5,
+      "stream_bytes": 21031,
+      "events": 2344,
+      "block_bytes": 21207,
+      "dda_writes": 0,
+      "public_track": 3,
+      "first_page": 5,
+      "page_count": 2,
+      "page_bytes": [
+        14333,
+        7051
+      ],
+      "page_events": [
+        1582,
+        762
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Kouri ja nai no yo!",
+      "duration": 163,
+      "loop": false,
+      "waves": 5,
+      "stream_bytes": 48033,
+      "events": 4887,
+      "block_bytes": 48209,
+      "dda_writes": 0,
+      "public_track": 4,
+      "first_page": 7,
+      "page_count": 4,
+      "page_bytes": [
+        14329,
+        14331,
+        14336,
+        5744
+      ],
+      "page_events": [
+        1460,
+        1431,
+        1446,
+        550
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Hyuu Hyuu",
+      "duration": 8,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 2065,
+      "events": 217,
+      "block_bytes": 2177,
+      "dda_writes": 0,
+      "public_track": 5,
+      "first_page": 11,
+      "page_count": 1,
+      "page_bytes": [
+        2177
+      ],
+      "page_events": [
+        217
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Gizmo March",
+      "duration": 14,
+      "loop": true,
+      "waves": 1,
+      "stream_bytes": 3584,
+      "events": 448,
+      "block_bytes": 3632,
+      "dda_writes": 0,
+      "public_track": 6,
+      "first_page": 12,
+      "page_count": 1,
+      "page_bytes": [
+        3632
+      ],
+      "page_events": [
+        448
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Uncle Pumpkin",
+      "duration": 45,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 12153,
+      "events": 1316,
+      "block_bytes": 12265,
+      "dda_writes": 0,
+      "public_track": 7,
+      "first_page": 13,
+      "page_count": 1,
+      "page_bytes": [
+        12265
+      ],
+      "page_events": [
+        1316
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Rampish Chase",
+      "duration": 64,
+      "loop": true,
+      "waves": 6,
+      "stream_bytes": 17958,
+      "events": 2170,
+      "block_bytes": 18166,
+      "dda_writes": 0,
+      "public_track": 8,
+      "first_page": 14,
+      "page_count": 2,
+      "page_bytes": [
+        14336,
+        4039
+      ],
+      "page_events": [
+        1713,
+        457
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Aah Yokatta...! 1",
+      "duration": 8,
+      "loop": false,
+      "waves": 2,
+      "stream_bytes": 1338,
+      "events": 189,
+      "block_bytes": 1418,
+      "dda_writes": 0,
+      "public_track": 9,
+      "first_page": 16,
+      "page_count": 1,
+      "page_bytes": [
+        1418
+      ],
+      "page_events": [
+        189
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Ra Ichizoku no Senritsu ni Yoru Hensoukyoku",
+      "duration": 123,
+      "loop": true,
+      "waves": 6,
+      "stream_bytes": 36842,
+      "events": 3973,
+      "block_bytes": 37050,
+      "dda_writes": 0,
+      "public_track": 10,
+      "first_page": 17,
+      "page_count": 3,
+      "page_bytes": [
+        14330,
+        14331,
+        8807
+      ],
+      "page_events": [
+        1466,
+        1530,
+        977
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Meisou no Waltz 1",
+      "duration": 76,
+      "loop": true,
+      "waves": 9,
+      "stream_bytes": 17960,
+      "events": 2342,
+      "block_bytes": 18264,
+      "dda_writes": 0,
+      "public_track": 11,
+      "first_page": 20,
+      "page_count": 2,
+      "page_bytes": [
+        14332,
+        4237
+      ],
+      "page_events": [
+        1865,
+        477
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Meisou no Waltz 2",
+      "duration": 155,
+      "loop": false,
+      "waves": 9,
+      "stream_bytes": 29196,
+      "events": 3155,
+      "block_bytes": 29500,
+      "dda_writes": 0,
+      "public_track": 12,
+      "first_page": 22,
+      "page_count": 3,
+      "page_bytes": [
+        14325,
+        14332,
+        1453
+      ],
+      "page_events": [
+        1262,
+        1738,
+        155
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Aah Yokatta...! 2",
+      "duration": 9,
+      "loop": false,
+      "waves": 2,
+      "stream_bytes": 1405,
+      "events": 146,
+      "block_bytes": 1485,
+      "dda_writes": 0,
+      "public_track": 13,
+      "first_page": 25,
+      "page_count": 1,
+      "page_bytes": [
+        1485
+      ],
+      "page_events": [
+        146
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Termination",
+      "duration": 66,
+      "loop": true,
+      "waves": 7,
+      "stream_bytes": 20542,
+      "events": 2180,
+      "block_bytes": 20782,
+      "dda_writes": 0,
+      "public_track": 14,
+      "first_page": 26,
+      "page_count": 2,
+      "page_bytes": [
+        14332,
+        6691
+      ],
+      "page_events": [
+        1487,
+        693
+      ]
+    },
+    {
+      "id": 16,
+      "title": "Ripple no Theme 1",
+      "duration": 57,
+      "loop": true,
+      "waves": 6,
+      "stream_bytes": 14265,
+      "events": 1701,
+      "block_bytes": 14473,
+      "dda_writes": 0,
+      "public_track": 15,
+      "first_page": 28,
+      "page_count": 2,
+      "page_bytes": [
+        14329,
+        353
+      ],
+      "page_events": [
+        1682,
+        19
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Ripple no Theme 2",
+      "duration": 116,
+      "loop": false,
+      "waves": 10,
+      "stream_bytes": 33592,
+      "events": 3671,
+      "block_bytes": 33928,
+      "dda_writes": 0,
+      "public_track": 16,
+      "first_page": 30,
+      "page_count": 3,
+      "page_bytes": [
+        14336,
+        14329,
+        5937
+      ],
+      "page_events": [
+        1587,
+        1464,
+        620
+      ]
+    },
+    {
+      "id": 1,
+      "title": "Awakening",
+      "duration": 4,
+      "loop": false,
+      "waves": 2,
+      "stream_bytes": 396,
+      "events": 46,
+      "block_bytes": 476,
+      "dda_writes": 0,
+      "public_track": 17,
+      "first_page": 33,
+      "page_count": 1,
+      "page_bytes": [
+        476
+      ],
+      "page_events": [
+        46
+      ]
+    },
+    {
+      "id": 0,
+      "title": "Ochitsuki ga nai wa yo!",
+      "duration": 41,
+      "loop": false,
+      "waves": 7,
+      "stream_bytes": 10464,
+      "events": 1126,
+      "block_bytes": 10704,
+      "dda_writes": 0,
+      "public_track": 18,
+      "first_page": 34,
+      "page_count": 1,
+      "page_bytes": [
+        10704
+      ],
+      "page_events": [
+        1126
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "track_index": 0,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 1,
+      "bytes": 14334,
+      "events": 1459,
+      "flags": 14
+    },
+    {
+      "page": 1,
+      "track_index": 0,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 0,
+      "bytes": 14054,
+      "events": 1545,
+      "flags": 30
+    },
+    {
+      "page": 2,
+      "track_index": 1,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 3,
+      "bytes": 14322,
+      "events": 1420,
+      "flags": 14
+    },
+    {
+      "page": 3,
+      "track_index": 1,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 2,
+      "bytes": 6905,
+      "events": 661,
+      "flags": 30
+    },
+    {
+      "page": 4,
+      "track_index": 2,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 10572,
+      "events": 971,
+      "flags": 7
+    },
+    {
+      "page": 5,
+      "track_index": 3,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 6,
+      "bytes": 14333,
+      "events": 1582,
+      "flags": 14
+    },
+    {
+      "page": 6,
+      "track_index": 3,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 5,
+      "bytes": 7051,
+      "events": 762,
+      "flags": 30
+    },
+    {
+      "page": 7,
+      "track_index": 4,
+      "chunk_index": 0,
+      "chunk_count": 4,
+      "next_page": 8,
+      "bytes": 14329,
+      "events": 1460,
+      "flags": 14
+    },
+    {
+      "page": 8,
+      "track_index": 4,
+      "chunk_index": 1,
+      "chunk_count": 4,
+      "next_page": 9,
+      "bytes": 14331,
+      "events": 1431,
+      "flags": 14
+    },
+    {
+      "page": 9,
+      "track_index": 4,
+      "chunk_index": 2,
+      "chunk_count": 4,
+      "next_page": 10,
+      "bytes": 14336,
+      "events": 1446,
+      "flags": 14
+    },
+    {
+      "page": 10,
+      "track_index": 4,
+      "chunk_index": 3,
+      "chunk_count": 4,
+      "next_page": null,
+      "bytes": 5744,
+      "events": 550,
+      "flags": 6
+    },
+    {
+      "page": 11,
+      "track_index": 5,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 2177,
+      "events": 217,
+      "flags": 6
+    },
+    {
+      "page": 12,
+      "track_index": 6,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 3632,
+      "events": 448,
+      "flags": 7
+    },
+    {
+      "page": 13,
+      "track_index": 7,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 12265,
+      "events": 1316,
+      "flags": 6
+    },
+    {
+      "page": 14,
+      "track_index": 8,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 15,
+      "bytes": 14336,
+      "events": 1713,
+      "flags": 14
+    },
+    {
+      "page": 15,
+      "track_index": 8,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 14,
+      "bytes": 4039,
+      "events": 457,
+      "flags": 30
+    },
+    {
+      "page": 16,
+      "track_index": 9,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 1418,
+      "events": 189,
+      "flags": 6
+    },
+    {
+      "page": 17,
+      "track_index": 10,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 18,
+      "bytes": 14330,
+      "events": 1466,
+      "flags": 14
+    },
+    {
+      "page": 18,
+      "track_index": 10,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 19,
+      "bytes": 14331,
+      "events": 1530,
+      "flags": 14
+    },
+    {
+      "page": 19,
+      "track_index": 10,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": 17,
+      "bytes": 8807,
+      "events": 977,
+      "flags": 30
+    },
+    {
+      "page": 20,
+      "track_index": 11,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 21,
+      "bytes": 14332,
+      "events": 1865,
+      "flags": 14
+    },
+    {
+      "page": 21,
+      "track_index": 11,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 20,
+      "bytes": 4237,
+      "events": 477,
+      "flags": 30
+    },
+    {
+      "page": 22,
+      "track_index": 12,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 23,
+      "bytes": 14325,
+      "events": 1262,
+      "flags": 14
+    },
+    {
+      "page": 23,
+      "track_index": 12,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 24,
+      "bytes": 14332,
+      "events": 1738,
+      "flags": 14
+    },
+    {
+      "page": 24,
+      "track_index": 12,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 1453,
+      "events": 155,
+      "flags": 6
+    },
+    {
+      "page": 25,
+      "track_index": 13,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 1485,
+      "events": 146,
+      "flags": 6
+    },
+    {
+      "page": 26,
+      "track_index": 14,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 27,
+      "bytes": 14332,
+      "events": 1487,
+      "flags": 14
+    },
+    {
+      "page": 27,
+      "track_index": 14,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 26,
+      "bytes": 6691,
+      "events": 693,
+      "flags": 30
+    },
+    {
+      "page": 28,
+      "track_index": 15,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 29,
+      "bytes": 14329,
+      "events": 1682,
+      "flags": 14
+    },
+    {
+      "page": 29,
+      "track_index": 15,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": 28,
+      "bytes": 353,
+      "events": 19,
+      "flags": 30
+    },
+    {
+      "page": 30,
+      "track_index": 16,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 31,
+      "bytes": 14336,
+      "events": 1587,
+      "flags": 14
+    },
+    {
+      "page": 31,
+      "track_index": 16,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 32,
+      "bytes": 14329,
+      "events": 1464,
+      "flags": 14
+    },
+    {
+      "page": 32,
+      "track_index": 16,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 5937,
+      "events": 620,
+      "flags": 6
+    },
+    {
+      "page": 33,
+      "track_index": 17,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 476,
+      "events": 46,
+      "flags": 6
+    },
+    {
+      "page": 34,
+      "track_index": 18,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 10704,
+      "events": 1126,
+      "flags": 6
+    }
+  ]
+}

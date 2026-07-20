@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "sha256": "bfdf998ff865cab5db0d9717811eeba94969b05cff6dbd1892c0e6d04bc8a2e6",
+  "size": 208387,
+  "kssx": {
+    "load": "0x4000",
+    "load_size": 1,
+    "init": "0x4000",
+    "play": "0x403e"
+  },
+  "kcpx": {
+    "version": 1,
+    "pages": 38,
+    "tracks": 38,
+    "template_bytes": 16384,
+    "overlay_end": 208387
+  },
+  "all_pages_materialized": true,
+  "all_track_blocks_valid_magic": true,
+  "file_consumed_exactly": true
+}

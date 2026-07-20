@@ -1,0 +1,1344 @@
+{
+  "status": "chunked SCC+ prototype; requires included KSPPLAYER page-gateway patch",
+  "source_hes_sha256": "0e0d0ee7511a702489a1fe23a88dd00221ddaf66ff2b436ff9748648f6ec0f4c",
+  "output_sha256": "86f3609abc8a4ea0750e84c5979d129d0989d50036391f2552d649f2f70dcde6",
+  "output_size": 465028,
+  "track_count": 32,
+  "internal_page_count": 54,
+  "engine": {
+    "load": "0x4000",
+    "init": "0x4000",
+    "play": "0x4022",
+    "bytes": 629,
+    "track_overlay": "0x4800",
+    "page_gateway": "0xd8a0"
+  },
+  "conversion": {
+    "HuC6280_channels_1_5": "SCC+ channels 1-5",
+    "HuC6280_channel_6": "MSX PSG tone A",
+    "HuC6280_DDA_and_noise": "MSX PSG noise B envelope",
+    "stereo": "folded to mono",
+    "timing": "60 Hz state/event replay",
+    "long_tracks": "split across internal KCP overlays; engine state remains resident"
+  },
+  "tracks": [
+    {
+      "id": 106,
+      "title": "Opening Theme",
+      "duration": 36,
+      "loop": false,
+      "waves": 5,
+      "stream_bytes": 5450,
+      "events": 675,
+      "block_bytes": 5626,
+      "dda_writes": 0,
+      "public_track": 0,
+      "first_page": 0,
+      "page_count": 1,
+      "page_bytes": [
+        5626
+      ],
+      "page_events": [
+        675
+      ]
+    },
+    {
+      "id": 107,
+      "title": "Title Theme",
+      "duration": 23,
+      "loop": false,
+      "waves": 12,
+      "stream_bytes": 5576,
+      "events": 597,
+      "block_bytes": 5976,
+      "dda_writes": 0,
+      "public_track": 1,
+      "first_page": 1,
+      "page_count": 1,
+      "page_bytes": [
+        5976
+      ],
+      "page_events": [
+        597
+      ]
+    },
+    {
+      "id": 127,
+      "title": "Password Entry",
+      "duration": 21,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 3480,
+      "events": 420,
+      "block_bytes": 3592,
+      "dda_writes": 0,
+      "public_track": 2,
+      "first_page": 2,
+      "page_count": 1,
+      "page_bytes": [
+        3592
+      ],
+      "page_events": [
+        420
+      ]
+    },
+    {
+      "id": 108,
+      "title": "Area Select",
+      "duration": 34,
+      "loop": false,
+      "waves": 7,
+      "stream_bytes": 8072,
+      "events": 752,
+      "block_bytes": 8312,
+      "dda_writes": 0,
+      "public_track": 3,
+      "first_page": 3,
+      "page_count": 1,
+      "page_bytes": [
+        8312
+      ],
+      "page_events": [
+        752
+      ]
+    },
+    {
+      "id": 110,
+      "title": "Stage Select",
+      "duration": 16,
+      "loop": false,
+      "waves": 1,
+      "stream_bytes": 3868,
+      "events": 314,
+      "block_bytes": 3916,
+      "dda_writes": 0,
+      "public_track": 4,
+      "first_page": 4,
+      "page_count": 1,
+      "page_bytes": [
+        3916
+      ],
+      "page_events": [
+        314
+      ]
+    },
+    {
+      "id": 111,
+      "title": "Area 1: Jammin' Jungle",
+      "duration": 129,
+      "loop": false,
+      "waves": 10,
+      "stream_bytes": 32738,
+      "events": 3553,
+      "block_bytes": 33074,
+      "dda_writes": 0,
+      "public_track": 5,
+      "first_page": 5,
+      "page_count": 3,
+      "page_bytes": [
+        14336,
+        14336,
+        5076
+      ],
+      "page_events": [
+        1487,
+        1531,
+        535
+      ]
+    },
+    {
+      "id": 117,
+      "title": "Stage Clear",
+      "duration": 3,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 988,
+      "events": 103,
+      "block_bytes": 1100,
+      "dda_writes": 0,
+      "public_track": 6,
+      "first_page": 8,
+      "page_count": 1,
+      "page_bytes": [
+        1100
+      ],
+      "page_events": [
+        103
+      ]
+    },
+    {
+      "id": 121,
+      "title": "Boss Theme 1 (Areas 1, 3, 4, 5)",
+      "duration": 88,
+      "loop": false,
+      "waves": 6,
+      "stream_bytes": 30718,
+      "events": 3035,
+      "block_bytes": 30926,
+      "dda_writes": 0,
+      "public_track": 7,
+      "first_page": 9,
+      "page_count": 3,
+      "page_bytes": [
+        14336,
+        14327,
+        2681
+      ],
+      "page_events": [
+        1402,
+        1397,
+        236
+      ]
+    },
+    {
+      "id": 112,
+      "title": "Area 2: Vexin' Volcano",
+      "duration": 145,
+      "loop": false,
+      "waves": 6,
+      "stream_bytes": 33914,
+      "events": 3442,
+      "block_bytes": 34122,
+      "dda_writes": 0,
+      "public_track": 8,
+      "first_page": 12,
+      "page_count": 3,
+      "page_bytes": [
+        14324,
+        14332,
+        5884
+      ],
+      "page_events": [
+        1460,
+        1447,
+        535
+      ]
+    },
+    {
+      "id": 120,
+      "title": "Boss Theme 2 (Area 2)",
+      "duration": 84,
+      "loop": false,
+      "waves": 8,
+      "stream_bytes": 21424,
+      "events": 2234,
+      "block_bytes": 21696,
+      "dda_writes": 0,
+      "public_track": 9,
+      "first_page": 15,
+      "page_count": 2,
+      "page_bytes": [
+        14319,
+        7650
+      ],
+      "page_events": [
+        1471,
+        763
+      ]
+    },
+    {
+      "id": 113,
+      "title": "Area 3: Slammin' Sea",
+      "duration": 165,
+      "loop": false,
+      "waves": 12,
+      "stream_bytes": 38833,
+      "events": 4328,
+      "block_bytes": 39233,
+      "dda_writes": 0,
+      "public_track": 10,
+      "first_page": 17,
+      "page_count": 3,
+      "page_bytes": [
+        14327,
+        14333,
+        11375
+      ],
+      "page_events": [
+        1569,
+        1559,
+        1200
+      ]
+    },
+    {
+      "id": 114,
+      "title": "Area 4: Crankin' Castle",
+      "duration": 174,
+      "loop": false,
+      "waves": 6,
+      "stream_bytes": 25248,
+      "events": 3140,
+      "block_bytes": 25456,
+      "dda_writes": 0,
+      "public_track": 11,
+      "first_page": 20,
+      "page_count": 2,
+      "page_bytes": [
+        14334,
+        11331
+      ],
+      "page_events": [
+        1770,
+        1370
+      ]
+    },
+    {
+      "id": 115,
+      "title": "Area 5: Thrashin' Tundra",
+      "duration": 183,
+      "loop": false,
+      "waves": 12,
+      "stream_bytes": 47107,
+      "events": 5334,
+      "block_bytes": 47507,
+      "dda_writes": 0,
+      "public_track": 12,
+      "first_page": 22,
+      "page_count": 4,
+      "page_bytes": [
+        14335,
+        14332,
+        14333,
+        5710
+      ],
+      "page_events": [
+        1565,
+        1561,
+        1599,
+        609
+      ]
+    },
+    {
+      "id": 109,
+      "title": "Final Area Intro",
+      "duration": 21,
+      "loop": false,
+      "waves": 4,
+      "stream_bytes": 4621,
+      "events": 488,
+      "block_bytes": 4765,
+      "dda_writes": 0,
+      "public_track": 13,
+      "first_page": 26,
+      "page_count": 1,
+      "page_bytes": [
+        4765
+      ],
+      "page_events": [
+        488
+      ]
+    },
+    {
+      "id": 116,
+      "title": "Final Area",
+      "duration": 114,
+      "loop": false,
+      "waves": 8,
+      "stream_bytes": 29544,
+      "events": 3144,
+      "block_bytes": 29816,
+      "dda_writes": 0,
+      "public_track": 14,
+      "first_page": 27,
+      "page_count": 3,
+      "page_bytes": [
+        14324,
+        14321,
+        1717
+      ],
+      "page_events": [
+        1476,
+        1494,
+        174
+      ]
+    },
+    {
+      "id": 136,
+      "title": "Final Boss (Part 1 Intro)",
+      "duration": 7,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 338,
+      "events": 36,
+      "block_bytes": 450,
+      "dda_writes": 0,
+      "public_track": 15,
+      "first_page": 30,
+      "page_count": 1,
+      "page_bytes": [
+        450
+      ],
+      "page_events": [
+        36
+      ]
+    },
+    {
+      "id": 123,
+      "title": "Final Boss (Part 1)",
+      "duration": 77,
+      "loop": false,
+      "waves": 5,
+      "stream_bytes": 14395,
+      "events": 1759,
+      "block_bytes": 14571,
+      "dda_writes": 0,
+      "public_track": 16,
+      "first_page": 31,
+      "page_count": 2,
+      "page_bytes": [
+        14326,
+        422
+      ],
+      "page_events": [
+        1729,
+        30
+      ]
+    },
+    {
+      "id": 137,
+      "title": "Final Boss (Part 2 Intro)",
+      "duration": 5,
+      "loop": false,
+      "waves": 1,
+      "stream_bytes": 93,
+      "events": 11,
+      "block_bytes": 141,
+      "dda_writes": 0,
+      "public_track": 17,
+      "first_page": 33,
+      "page_count": 1,
+      "page_bytes": [
+        141
+      ],
+      "page_events": [
+        11
+      ]
+    },
+    {
+      "id": 124,
+      "title": "Final Boss (Part 2)",
+      "duration": 87,
+      "loop": false,
+      "waves": 7,
+      "stream_bytes": 17681,
+      "events": 1978,
+      "block_bytes": 17921,
+      "dda_writes": 0,
+      "public_track": 18,
+      "first_page": 34,
+      "page_count": 2,
+      "page_bytes": [
+        14327,
+        3835
+      ],
+      "page_events": [
+        1564,
+        414
+      ]
+    },
+    {
+      "id": 122,
+      "title": "Final Boss (Part 3 Intro)",
+      "duration": 7,
+      "loop": false,
+      "waves": 1,
+      "stream_bytes": 709,
+      "events": 77,
+      "block_bytes": 757,
+      "dda_writes": 0,
+      "public_track": 19,
+      "first_page": 36,
+      "page_count": 1,
+      "page_bytes": [
+        757
+      ],
+      "page_events": [
+        77
+      ]
+    },
+    {
+      "id": 125,
+      "title": "Final Boss (Part 3)",
+      "duration": 46,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 14680,
+      "events": 1515,
+      "block_bytes": 14792,
+      "dda_writes": 0,
+      "public_track": 20,
+      "first_page": 37,
+      "page_count": 2,
+      "page_bytes": [
+        14334,
+        571
+      ],
+      "page_events": [
+        1461,
+        54
+      ]
+    },
+    {
+      "id": 126,
+      "title": "Game Clear",
+      "duration": 9,
+      "loop": false,
+      "waves": 4,
+      "stream_bytes": 1518,
+      "events": 160,
+      "block_bytes": 1662,
+      "dda_writes": 0,
+      "public_track": 21,
+      "first_page": 39,
+      "page_count": 1,
+      "page_bytes": [
+        1662
+      ],
+      "page_events": [
+        160
+      ]
+    },
+    {
+      "id": 118,
+      "title": "Player Death",
+      "duration": 2,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 434,
+      "events": 40,
+      "block_bytes": 546,
+      "dda_writes": 0,
+      "public_track": 22,
+      "first_page": 40,
+      "page_count": 1,
+      "page_bytes": [
+        546
+      ],
+      "page_events": [
+        40
+      ]
+    },
+    {
+      "id": 135,
+      "title": "Staff Roll",
+      "duration": 90,
+      "loop": false,
+      "waves": 8,
+      "stream_bytes": 27381,
+      "events": 2997,
+      "block_bytes": 27653,
+      "dda_writes": 0,
+      "public_track": 23,
+      "first_page": 41,
+      "page_count": 2,
+      "page_bytes": [
+        14324,
+        13602
+      ],
+      "page_events": [
+        1544,
+        1453
+      ]
+    },
+    {
+      "id": 119,
+      "title": "Game Over",
+      "duration": 13,
+      "loop": false,
+      "waves": 4,
+      "stream_bytes": 1945,
+      "events": 270,
+      "block_bytes": 2089,
+      "dda_writes": 0,
+      "public_track": 24,
+      "first_page": 43,
+      "page_count": 1,
+      "page_bytes": [
+        2089
+      ],
+      "page_events": [
+        270
+      ]
+    },
+    {
+      "id": 128,
+      "title": "Battle Configuration",
+      "duration": 43,
+      "loop": false,
+      "waves": 2,
+      "stream_bytes": 8201,
+      "events": 985,
+      "block_bytes": 8281,
+      "dda_writes": 0,
+      "public_track": 25,
+      "first_page": 44,
+      "page_count": 1,
+      "page_bytes": [
+        8281
+      ],
+      "page_events": [
+        985
+      ]
+    },
+    {
+      "id": 129,
+      "title": "Battle Start",
+      "duration": 3,
+      "loop": false,
+      "waves": 1,
+      "stream_bytes": 782,
+      "events": 61,
+      "block_bytes": 830,
+      "dda_writes": 0,
+      "public_track": 26,
+      "first_page": 45,
+      "page_count": 1,
+      "page_bytes": [
+        830
+      ],
+      "page_events": [
+        61
+      ]
+    },
+    {
+      "id": 130,
+      "title": "Battle Theme",
+      "duration": 159,
+      "loop": false,
+      "waves": 8,
+      "stream_bytes": 47014,
+      "events": 4992,
+      "block_bytes": 47286,
+      "dda_writes": 0,
+      "public_track": 27,
+      "first_page": 46,
+      "page_count": 4,
+      "page_bytes": [
+        14330,
+        14334,
+        14336,
+        5105
+      ],
+      "page_events": [
+        1509,
+        1465,
+        1489,
+        529
+      ]
+    },
+    {
+      "id": 131,
+      "title": "Battle Win",
+      "duration": 3,
+      "loop": false,
+      "waves": 3,
+      "stream_bytes": 765,
+      "events": 86,
+      "block_bytes": 877,
+      "dda_writes": 0,
+      "public_track": 28,
+      "first_page": 50,
+      "page_count": 1,
+      "page_bytes": [
+        877
+      ],
+      "page_events": [
+        86
+      ]
+    },
+    {
+      "id": 132,
+      "title": "Battle Draw",
+      "duration": 10,
+      "loop": false,
+      "waves": 6,
+      "stream_bytes": 2176,
+      "events": 242,
+      "block_bytes": 2384,
+      "dda_writes": 0,
+      "public_track": 29,
+      "first_page": 51,
+      "page_count": 1,
+      "page_bytes": [
+        2384
+      ],
+      "page_events": [
+        242
+      ]
+    },
+    {
+      "id": 133,
+      "title": "Battle Victory",
+      "duration": 27,
+      "loop": false,
+      "waves": 4,
+      "stream_bytes": 5866,
+      "events": 720,
+      "block_bytes": 6010,
+      "dda_writes": 0,
+      "public_track": 30,
+      "first_page": 52,
+      "page_count": 1,
+      "page_bytes": [
+        6010
+      ],
+      "page_events": [
+        720
+      ]
+    },
+    {
+      "id": 134,
+      "title": "Unknown Fanfare",
+      "duration": 1,
+      "loop": false,
+      "waves": 1,
+      "stream_bytes": 178,
+      "events": 19,
+      "block_bytes": 226,
+      "dda_writes": 0,
+      "public_track": 31,
+      "first_page": 53,
+      "page_count": 1,
+      "page_bytes": [
+        226
+      ],
+      "page_events": [
+        19
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "track_index": 0,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 5626,
+      "events": 675,
+      "flags": 6
+    },
+    {
+      "page": 1,
+      "track_index": 1,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 5976,
+      "events": 597,
+      "flags": 6
+    },
+    {
+      "page": 2,
+      "track_index": 2,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 3592,
+      "events": 420,
+      "flags": 6
+    },
+    {
+      "page": 3,
+      "track_index": 3,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 8312,
+      "events": 752,
+      "flags": 6
+    },
+    {
+      "page": 4,
+      "track_index": 4,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 3916,
+      "events": 314,
+      "flags": 6
+    },
+    {
+      "page": 5,
+      "track_index": 5,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 6,
+      "bytes": 14336,
+      "events": 1487,
+      "flags": 14
+    },
+    {
+      "page": 6,
+      "track_index": 5,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 7,
+      "bytes": 14336,
+      "events": 1531,
+      "flags": 14
+    },
+    {
+      "page": 7,
+      "track_index": 5,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 5076,
+      "events": 535,
+      "flags": 6
+    },
+    {
+      "page": 8,
+      "track_index": 6,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 1100,
+      "events": 103,
+      "flags": 6
+    },
+    {
+      "page": 9,
+      "track_index": 7,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 10,
+      "bytes": 14336,
+      "events": 1402,
+      "flags": 14
+    },
+    {
+      "page": 10,
+      "track_index": 7,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 11,
+      "bytes": 14327,
+      "events": 1397,
+      "flags": 14
+    },
+    {
+      "page": 11,
+      "track_index": 7,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 2681,
+      "events": 236,
+      "flags": 6
+    },
+    {
+      "page": 12,
+      "track_index": 8,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 13,
+      "bytes": 14324,
+      "events": 1460,
+      "flags": 14
+    },
+    {
+      "page": 13,
+      "track_index": 8,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 14,
+      "bytes": 14332,
+      "events": 1447,
+      "flags": 14
+    },
+    {
+      "page": 14,
+      "track_index": 8,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 5884,
+      "events": 535,
+      "flags": 6
+    },
+    {
+      "page": 15,
+      "track_index": 9,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 16,
+      "bytes": 14319,
+      "events": 1471,
+      "flags": 14
+    },
+    {
+      "page": 16,
+      "track_index": 9,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 7650,
+      "events": 763,
+      "flags": 6
+    },
+    {
+      "page": 17,
+      "track_index": 10,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 18,
+      "bytes": 14327,
+      "events": 1569,
+      "flags": 14
+    },
+    {
+      "page": 18,
+      "track_index": 10,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 19,
+      "bytes": 14333,
+      "events": 1559,
+      "flags": 14
+    },
+    {
+      "page": 19,
+      "track_index": 10,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 11375,
+      "events": 1200,
+      "flags": 6
+    },
+    {
+      "page": 20,
+      "track_index": 11,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 21,
+      "bytes": 14334,
+      "events": 1770,
+      "flags": 14
+    },
+    {
+      "page": 21,
+      "track_index": 11,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 11331,
+      "events": 1370,
+      "flags": 6
+    },
+    {
+      "page": 22,
+      "track_index": 12,
+      "chunk_index": 0,
+      "chunk_count": 4,
+      "next_page": 23,
+      "bytes": 14335,
+      "events": 1565,
+      "flags": 14
+    },
+    {
+      "page": 23,
+      "track_index": 12,
+      "chunk_index": 1,
+      "chunk_count": 4,
+      "next_page": 24,
+      "bytes": 14332,
+      "events": 1561,
+      "flags": 14
+    },
+    {
+      "page": 24,
+      "track_index": 12,
+      "chunk_index": 2,
+      "chunk_count": 4,
+      "next_page": 25,
+      "bytes": 14333,
+      "events": 1599,
+      "flags": 14
+    },
+    {
+      "page": 25,
+      "track_index": 12,
+      "chunk_index": 3,
+      "chunk_count": 4,
+      "next_page": null,
+      "bytes": 5710,
+      "events": 609,
+      "flags": 6
+    },
+    {
+      "page": 26,
+      "track_index": 13,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 4765,
+      "events": 488,
+      "flags": 6
+    },
+    {
+      "page": 27,
+      "track_index": 14,
+      "chunk_index": 0,
+      "chunk_count": 3,
+      "next_page": 28,
+      "bytes": 14324,
+      "events": 1476,
+      "flags": 14
+    },
+    {
+      "page": 28,
+      "track_index": 14,
+      "chunk_index": 1,
+      "chunk_count": 3,
+      "next_page": 29,
+      "bytes": 14321,
+      "events": 1494,
+      "flags": 14
+    },
+    {
+      "page": 29,
+      "track_index": 14,
+      "chunk_index": 2,
+      "chunk_count": 3,
+      "next_page": null,
+      "bytes": 1717,
+      "events": 174,
+      "flags": 6
+    },
+    {
+      "page": 30,
+      "track_index": 15,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 450,
+      "events": 36,
+      "flags": 6
+    },
+    {
+      "page": 31,
+      "track_index": 16,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 32,
+      "bytes": 14326,
+      "events": 1729,
+      "flags": 14
+    },
+    {
+      "page": 32,
+      "track_index": 16,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 422,
+      "events": 30,
+      "flags": 6
+    },
+    {
+      "page": 33,
+      "track_index": 17,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 141,
+      "events": 11,
+      "flags": 6
+    },
+    {
+      "page": 34,
+      "track_index": 18,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 35,
+      "bytes": 14327,
+      "events": 1564,
+      "flags": 14
+    },
+    {
+      "page": 35,
+      "track_index": 18,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 3835,
+      "events": 414,
+      "flags": 6
+    },
+    {
+      "page": 36,
+      "track_index": 19,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 757,
+      "events": 77,
+      "flags": 6
+    },
+    {
+      "page": 37,
+      "track_index": 20,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 38,
+      "bytes": 14334,
+      "events": 1461,
+      "flags": 14
+    },
+    {
+      "page": 38,
+      "track_index": 20,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 571,
+      "events": 54,
+      "flags": 6
+    },
+    {
+      "page": 39,
+      "track_index": 21,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 1662,
+      "events": 160,
+      "flags": 6
+    },
+    {
+      "page": 40,
+      "track_index": 22,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 546,
+      "events": 40,
+      "flags": 6
+    },
+    {
+      "page": 41,
+      "track_index": 23,
+      "chunk_index": 0,
+      "chunk_count": 2,
+      "next_page": 42,
+      "bytes": 14324,
+      "events": 1544,
+      "flags": 14
+    },
+    {
+      "page": 42,
+      "track_index": 23,
+      "chunk_index": 1,
+      "chunk_count": 2,
+      "next_page": null,
+      "bytes": 13602,
+      "events": 1453,
+      "flags": 6
+    },
+    {
+      "page": 43,
+      "track_index": 24,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 2089,
+      "events": 270,
+      "flags": 6
+    },
+    {
+      "page": 44,
+      "track_index": 25,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 8281,
+      "events": 985,
+      "flags": 6
+    },
+    {
+      "page": 45,
+      "track_index": 26,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 830,
+      "events": 61,
+      "flags": 6
+    },
+    {
+      "page": 46,
+      "track_index": 27,
+      "chunk_index": 0,
+      "chunk_count": 4,
+      "next_page": 47,
+      "bytes": 14330,
+      "events": 1509,
+      "flags": 14
+    },
+    {
+      "page": 47,
+      "track_index": 27,
+      "chunk_index": 1,
+      "chunk_count": 4,
+      "next_page": 48,
+      "bytes": 14334,
+      "events": 1465,
+      "flags": 14
+    },
+    {
+      "page": 48,
+      "track_index": 27,
+      "chunk_index": 2,
+      "chunk_count": 4,
+      "next_page": 49,
+      "bytes": 14336,
+      "events": 1489,
+      "flags": 14
+    },
+    {
+      "page": 49,
+      "track_index": 27,
+      "chunk_index": 3,
+      "chunk_count": 4,
+      "next_page": null,
+      "bytes": 5105,
+      "events": 529,
+      "flags": 6
+    },
+    {
+      "page": 50,
+      "track_index": 28,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 877,
+      "events": 86,
+      "flags": 6
+    },
+    {
+      "page": 51,
+      "track_index": 29,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 2384,
+      "events": 242,
+      "flags": 6
+    },
+    {
+      "page": 52,
+      "track_index": 30,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 6010,
+      "events": 720,
+      "flags": 6
+    },
+    {
+      "page": 53,
+      "track_index": 31,
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "next_page": null,
+      "bytes": 226,
+      "events": 19,
+      "flags": 6
+    }
+  ],
+  "validation": {
+    "container": {
+      "ok": true,
+      "format": "KSSX/KCPX",
+      "version": 1,
+      "tracks": 32,
+      "internal_pages": 54,
+      "load_address": "0x4000",
+      "template_size": 16384,
+      "overlay_base": "0x4800",
+      "file_size": 465028,
+      "sha256": "86f3609abc8a4ea0750e84c5979d129d0989d50036391f2552d649f2f70dcde6",
+      "public_song_ids": [
+        106,
+        107,
+        127,
+        108,
+        110,
+        111,
+        117,
+        121,
+        112,
+        120,
+        113,
+        114,
+        115,
+        109,
+        116,
+        136,
+        123,
+        137,
+        124,
+        122,
+        125,
+        126,
+        118,
+        135,
+        119,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134
+      ],
+      "first_pages": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        8,
+        9,
+        12,
+        15,
+        17,
+        20,
+        22,
+        26,
+        27,
+        30,
+        31,
+        33,
+        34,
+        36,
+        37,
+        39,
+        40,
+        41,
+        43,
+        44,
+        45,
+        46,
+        50,
+        51,
+        52,
+        53
+      ],
+      "max_overlay_bytes": 14336,
+      "parsed_to_eof": true
+    },
+    "z80_instruction_emulation": {
+      "ok": true,
+      "tracks": 32,
+      "internal_pages": 54,
+      "total_instructions": 5483585,
+      "max_track_instructions": 598561
+    },
+    "audible_hardware_tested": false
+  }
+}

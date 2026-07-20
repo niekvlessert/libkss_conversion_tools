@@ -1,0 +1,19 @@
+--- a/msx/KSPPLAYER.asm
++++ b/msx/KSPPLAYER.asm
+@@
+ kcpx_silence:
+@@
+         ld      a,0x3F
+         ld      (0x9000),a
++        ; Silence SCC-I/SCC+ as well. A KCP engine can leave the Sound
++        ; Cartridge in SCC+ mode, where the 9800H compatibility window is
++        ; not the active register block.
++        xor     a
++        ld      hl,0xB8AA
++        ld      b,6
++kcpx_silence_sccplus:
++        ld      (hl),a
++        inc     hl
++        djnz    kcpx_silence_sccplus
+         xor     a
+         ld      hl,0x9880
